@@ -36,9 +36,12 @@ def build_targets(pred_corners, target, num_keypoints, num_anchors, num_classes,
                 g.append(target[b][t*num_labels+2*i+2])
 
             cur_gt_corners = torch.FloatTensor(g).repeat(nAnchors,1).t() # 16 x nAnchors
-            cur_confs  = torch.max(cur_confs, corner_confidences(cur_pred_corners, cur_gt_corners)).view_as(conf_mask[b]) # some irrelevant areas are filtered, in the same grid multiple anchor boxes might exceed the threshold
+            cur_confs = torch.max(cur_confs, corner_confidences(cur_pred_corners, cur_gt_corners)).view_as(conf_mask[b]) # some irrelevant areas are filtered, in the same grid multiple anchor boxes might exceed the threshold
+        
+        # reshape in case target[b][t*num_labels+1] == 0 for the full loop so .view_as never gets called
+        if len(cur_confs.size()) == 1:
+            cur_confs = cur_confs.reshape(conf_mask[b].size())
         conf_mask[b][cur_confs>sil_thresh] = 0
-
 
     nGT = 0
     nCorrect = 0

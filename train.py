@@ -356,8 +356,26 @@ if __name__ == "__main__":
     testing_accuracies      = []
 
     # Get the intrinsic camerea matrix, mesh, vertices and corners of the model
-    mesh                 = MeshPly(meshname)
-    vertices             = np.c_[np.array(mesh.vertices), np.ones((len(mesh.vertices), 1))].transpose()
+    if datacfg.split('/')[1].split('.')[0].split("_")[0] == "mslquad":
+        l = 0.27
+        w = 0.27
+        h = 0.13
+        half_length = l/2.
+        half_width  = w/2.
+        half_height = h/2.
+        # vertices must be 4 x N for compute_projections to work later
+        vertices = np.array([[ half_length, half_width, half_height, 1.],
+                              [ half_length, half_width,-half_height, 1.],
+                              [ half_length,-half_width,-half_height, 1.],
+                              [ half_length,-half_width, half_height, 1.],
+                              [-half_length,-half_width, half_height, 1.],
+                              [-half_length,-half_width,-half_height, 1.],
+                              [-half_length, half_width,-half_height, 1.],
+                              [-half_length, half_width, half_height, 1.]]).T
+    else:
+        mesh                 = MeshPly(meshname)
+        vertices             = np.c_[np.array(mesh.vertices), np.ones((len(mesh.vertices), 1))].transpose()
+        
     corners3D            = get_3D_corners(vertices)
     internal_calibration = get_camera_intrinsic(u0, v0, fx, fy)
 

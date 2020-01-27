@@ -1,0 +1,14 @@
+train  = MSLQUAD/mslquad/train.txt
+valid  = MSLQUAD/mslquad/test.txt
+backup = backup/mslquad
+mesh = MSLQUAD/mslquad/mslquad.ply
+name = mslquad
+diam = 0.311
+width = 640
+height = 480
+fx = 617.2744140625
+fy = 617.335693359375
+u0 = 324.1011047363281
+v0 = 241.5790557861328
+gpus = 0
+num_workers = 4
