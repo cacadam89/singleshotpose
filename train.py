@@ -282,11 +282,8 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt, epoch, batc
     corners2D_gt/corners2D_pr is a 9x2 numpy array
     """
     open_cv_image = np.array(img)  # make it a numpy arr
-    open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image[:, :, ::-1]), 0, -1) # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
-    # pdb.set_trace()
+    open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image), 0, -1)[:, :, ::-1] # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
     open_cv_image = cv2.resize(open_cv_image, (640, 480))
-    # cv2.imwrite("test_image.jpg", open_cv_image)
-    # pdb.set_trace()
 
     dot_radius = 2
     color_list = [(255, 0, 0),     # 0 blue: center
@@ -313,7 +310,6 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt, epoch, batc
         open_cv_image = cv2.line(open_cv_image, (corners2D_pr[inds[0],0], corners2D_pr[inds[0],1]), (corners2D_pr[inds[1],0], corners2D_pr[inds[1], 1]), color_pr, linewidth)
     cv2.imwrite("./backup/mslquad/test_imgs/epoch_{}_batch_{}_detect_num_{}.jpg".format(epoch, batch_idx, detect_num), open_cv_image)
 
-    # pdb.set_trace()
     return open_cv_image
 ###########################################################
 
