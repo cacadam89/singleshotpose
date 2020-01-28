@@ -24,6 +24,7 @@ from MeshPly import MeshPly
 
 import warnings
 warnings.filterwarnings("ignore")
+import pdb
 
 # Create new directory
 def makedirs(path):
