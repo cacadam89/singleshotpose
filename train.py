@@ -197,7 +197,7 @@ def test(epoch, niter):
 
                 # [OPTIONAL] generate images with bb drawn on them
                 if True:
-                    draw_2d_proj_of_3D_bounding_box(data, corners2D_pr, corners2D_gt, batch_idx, k)
+                    draw_2d_proj_of_3D_bounding_box(data, corners2D_pr, corners2D_gt, epoch, batch_idx, k)
                     # pdb.set_trace()
                 # Compute corner prediction error
                 corner_norm = np.linalg.norm(corners2D_gt - corners2D_pr, axis=1)
@@ -277,12 +277,12 @@ def test(epoch, niter):
 
 
 ###########################################################
-def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt, batch_idx, detect_num):
+def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt, epoch, batch_idx, detect_num):
     """
     corners2D_gt/corners2D_pr is a 9x2 numpy array
     """
     open_cv_image = np.array(img)  # make it a numpy arr
-    open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image), 0, -1) # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
+    open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image[:, :, ::-1]), 0, -1) # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
     # pdb.set_trace()
     open_cv_image = cv2.resize(open_cv_image, (640, 480))
     # cv2.imwrite("test_image.jpg", open_cv_image)
@@ -311,7 +311,7 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt, batch_idx, 
     for inds in inds_to_connect:
         open_cv_image = cv2.line(open_cv_image, (corners2D_gt[inds[0],0], corners2D_gt[inds[0],1]), (corners2D_gt[inds[1],0], corners2D_gt[inds[1], 1]), color_gt, linewidth)
         open_cv_image = cv2.line(open_cv_image, (corners2D_pr[inds[0],0], corners2D_pr[inds[0],1]), (corners2D_pr[inds[1],0], corners2D_pr[inds[1], 1]), color_pr, linewidth)
-    cv2.imwrite("./backup/mslquad/test_imgs/batch_{}_detect_num_{}.jpg".format(batch_idx, detect_num), open_cv_image)
+    cv2.imwrite("./backup/mslquad/test_imgs/epoch_{}_batch_{}_detect_num_{}.jpg".format(epoch, batch_idx, detect_num), open_cv_image)
 
     # pdb.set_trace()
     return open_cv_image
@@ -458,8 +458,6 @@ if __name__ == "__main__":
         niter = train(epoch)
         # TEST and SAVE
         if (epoch % 10 == 0) and (epoch > 15): 
-        # if epoch > 0:
-        #     print("WARNING THIS IS DEBUG CODE THIS SHOULDNT BE LIKE THIS NORMALLY!!!!")
             test(epoch, niter)
             logging('save training stats to %s/costs.npz' % (backupdir))
             np.savez(os.path.join(backupdir, "costs.npz"),
