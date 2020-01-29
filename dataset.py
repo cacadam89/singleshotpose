@@ -10,45 +10,101 @@ import torch
 
 from torch.utils.data import Dataset
 from utils import read_truths_args, read_truths, get_all_files
+from raptor_camera import camera
+import pdb
+
 
 class listDataset(Dataset):
 
-    def __init__(self, root, shape=None, shuffle=True, transform=None, target_transform=None, train=False, seen=0, batch_size=64, num_workers=4, cell_size=32, bg_file_names=None, num_keypoints=9, max_num_gt=50):
+    def __init__(self, root, shape=None, shuffle=True, transform=None, target_transform=None, train=False, seen=0, batch_size=64, num_workers=4, cell_size=32, bg_file_names=None, num_keypoints=9, max_num_gt=50, cam_params=None):
 
-      # root             : list of training or test images
-      # shape            : shape of the image input to the network
-      # shuffle          : whether to shuffle or not 
-      # tranform         : any pytorch-specific transformation to the input image 
-      # target_transform : any pytorch-specific tranformation to the target output
-      # train            : whether it is training data or test data
-      # seen             : the number of visited examples (iteration of the batch x batch size) # TODO: check if this is correctly assigned
-      # batch_size       : how many examples there are in the batch
-      # num_workers      : check what this is
-      # bg_file_names    : the filenames for images from which you assign random backgrounds
+        # root             : list of training or test images
+        # shape            : shape of the image input to the network
+        # shuffle          : whether to shuffle or not 
+        # tranform         : any pytorch-specific transformation to the input image 
+        # target_transform : any pytorch-specific tranformation to the target output
+        # train            : whether it is training data or test data
+        # seen             : the number of visited examples (iteration of the batch x batch size) # TODO: check if this is correctly assigned
+        # batch_size       : how many examples there are in the batch
+        # num_workers      : check what this is
+        # bg_file_names    : the filenames for images from which you assign random backgrounds
 
-       # read the the list of dataset images
-       with open(root, 'r') as file:
-           self.lines = file.readlines()
+        # read the the list of dataset images
+        with open(root, 'r') as file:
+            self.lines = file.readlines()
 
-       # Shuffle
-       if shuffle:
-           random.shuffle(self.lines)
+        if cam_params is not None:
+            keep_list = []
+            box_gt = []
+            def truths_length(truths, max_num_gt=50):
+                for i in range(max_num_gt):
+                    if truths[i][1] == 0:
+                        return i
+            # cam_params = (K, dist_coefs, im_width, im_height, tf_cam_ego)
+            # reject any gt's that are not in FOV!
+            my_camera = camera(*cam_params) 
+            for l in self.lines:
+                # Get the image path
+                num_img = len(self.lines)
+                imgpath = l.rstrip()
+                labpath = imgpath.replace('images', 'labels').replace('JPEGImages', 'labels').replace('.jpg', '.txt').replace('.png','.txt')
+                num_labels = 2*num_keypoints+3 # +2 for ground-truth of width/height , +1 for class label
+                label = torch.zeros(max_num_gt*num_labels)
+                if os.path.getsize(labpath):
+                    ow = my_camera.im_w
+                    oh = my_camera.im_h
+                    tmp = torch.from_numpy(read_truths_args(labpath))
+                    tmp = tmp.view(-1)
+                    tsz = tmp.numel()
+                    if tsz > max_num_gt*num_labels:
+                        label = tmp[0:max_num_gt*num_labels]
+                    elif tsz > 0:
+                        label[0:tsz] = tmp
+                label = label.cuda()
+                truths = label.view(-1, num_labels)
+                num_gts = truths_length(truths)
+                for k in range(num_gts):
+                    box_gt = list()
+                    for j in range(1, 2*num_keypoints+1):
+                        box_gt.append(truths[k][j])
+                    box_gt.extend([1.0, 1.0])
+                    box_gt.append(truths[k][0])
+                corners2D_gt = np.array(np.reshape(box_gt[:18], [-1, 2]), dtype='float32')
+                if np.any(corners2D_gt < 0) or np.any(corners2D_gt > 1):
+                    keep_list.append(False)
+                else:
+                    keep_list.append(True)
+                    # print("failure detected")
+                    # pdb.set_trace()
+            # pdb.set_trace()
+            # print(len(keep_list))
+            # self.lines = [l for (i, l) in enumerate(self.lines) if keep_list[i]]
+            self.lines = [l for (l, my_bool) in zip(self.lines, keep_list) if my_bool]
+            print('Keeping {} / {} images (throwing out images with no drone in FOV)'.format(len(self.lines), num_img))
+            # pdb.set_trace()
 
-       # Initialize variables
-       self.nSamples         = len(self.lines)
-       self.transform        = transform
-       self.target_transform = target_transform
-       self.train            = train
-       self.shape            = shape
-       self.seen             = seen
-       self.batch_size       = batch_size
-       self.num_workers      = num_workers
-       self.bg_file_names    = bg_file_names
-       self.cell_size        = cell_size
-       self.nbatches         = self.nSamples // self.batch_size
-       self.num_keypoints    = num_keypoints
-       self.max_num_gt       = max_num_gt # maximum number of ground-truth labels an image can have
+
     
+
+        # Shuffle
+        if shuffle:
+            random.shuffle(self.lines)
+
+        # Initialize variables
+        self.nSamples         = len(self.lines)
+        self.transform        = transform
+        self.target_transform = target_transform
+        self.train            = train
+        self.shape            = shape
+        self.seen             = seen
+        self.batch_size       = batch_size
+        self.num_workers      = num_workers
+        self.bg_file_names    = bg_file_names
+        self.cell_size        = cell_size
+        self.nbatches         = self.nSamples // self.batch_size
+        self.num_keypoints    = num_keypoints
+        self.max_num_gt       = max_num_gt # maximum number of ground-truth labels an image can have
+
     # Get the number of samples in the dataset
     def __len__(self):
         return self.nSamples

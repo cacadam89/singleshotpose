@@ -112,10 +112,26 @@ def valid(datacfg, modelcfg, weightfile):
     num_labels    = num_keypoints * 2 + 3 # +2 for width, height,  +1 for class label
 
     # Get the parser for the test dataset
+    fx           = float(data_options['fx'])
+    fy           = float(data_options['fy'])
+    u0           = float(data_options['u0'])
+    v0           = float(data_options['v0'])
+    im_width     = int(data_options['width'])
+    im_height    = int(data_options['height'])
+
+    K = np.eye(3)
+    K[0, 0] = fx
+    K[1, 1] = fy
+    K[0, 2] = im_width / 2.
+    K[1, 2] = im_height / 2.
+    dist_coefs = None
+    tf_cam_ego = None
+    cam_params = (K, dist_coefs, im_width, im_height, tf_cam_ego)
     valid_dataset = dataset.listDataset(valid_images, 
                                         shape=(test_width, test_height),
                                         shuffle=False,
-                                        transform=transforms.Compose([transforms.ToTensor(),]))
+                                        transform=transforms.Compose([transforms.ToTensor(),]),
+                                        cam_params=cam_params)
 
     # Specify the number of workers for multiple processing, get the dataloader for the test dataset
     kwargs = {'num_workers': 4, 'pin_memory': True}

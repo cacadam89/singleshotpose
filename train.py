@@ -298,6 +298,8 @@ if __name__ == "__main__":
     trainlist     = data_options['train']
     testlist      = data_options['valid']
     gpus          = data_options['gpus']
+    name         = data_options['name']
+
     if 'mesh' in data_options:
         meshname  = data_options['mesh']
     else:
