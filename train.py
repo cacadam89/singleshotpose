@@ -335,12 +335,13 @@ if __name__ == "__main__":
     gpus          = data_options['gpus']
     if 'mesh' in data_options:
         meshname  = data_options['mesh']
-        assert('box_length' in data_options)
-        box_length = data_options['box_length']
-        box_width = data_options['box_width']
-        box_height = data_options['box_height']
     else:
         meshname  = None
+        assert('box_length' in data_options)
+        box_length = float(data_options['box_length'])
+        box_width = float(data_options['box_width'])
+        box_height = float(data_options['box_height'])
+
     num_workers   = int(data_options['num_workers'])
     backupdir     = data_options['backup']
     vx_threshold  = float(data_options['diam']) * 0.1 # threshold for the ADD metric

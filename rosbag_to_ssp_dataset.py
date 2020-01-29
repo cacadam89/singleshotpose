@@ -15,6 +15,7 @@ from geometry_msgs.msg import PoseStamped, Twist, Pose
 from sensor_msgs.msg import Image, CameraInfo
 # Utils
 from rosbag_dataset_utils import *
+from create_test_and_train_lists import *
 
 class dataset_creater:
     def __init__(self):
@@ -25,7 +26,8 @@ class dataset_creater:
         input_rosbag = 'rosbag_for_post_process_2019-12-18-02-10-28' + '.bag'
         self.dataset_str = 'mslquad'
         self.dataset_STR = self.dataset_str.upper()
-        num_images_to_train_on = 1000  # will be used to call create_test_and_train_list...
+        self.num_train_images = 1000  # will be used to call create_test_and_train_list...
+        self.num_test_images = 1000  # will be used to call create_test_and_train_list...
         self.cfg_dir = './cfg/'
         
         # Topic names
@@ -55,13 +57,13 @@ class dataset_creater:
         #######################################
 
         # create dir structure
-        dataset_dir = "./{}/{}/".format(self.dataset_STR, self.dataset_str)
-        if not os.path.exists(dataset_dir):
-            os.makedirs(dataset_dir)
-        self.image_dir = dataset_dir + "images"
+        self.dataset_dir = "./{}/{}/".format(self.dataset_STR, self.dataset_str)
+        if not os.path.exists(self.dataset_dir):
+            os.makedirs(self.dataset_dir)
+        self.image_dir = self.dataset_dir + "images"
         if not os.path.exists(self.image_dir):
             os.makedirs(self.image_dir)
-        self.label_dir = dataset_dir + "labels"
+        self.label_dir = self.dataset_dir + "labels"
         if not os.path.exists(self.label_dir):
             os.makedirs(self.label_dir)
 
@@ -97,7 +99,8 @@ class dataset_creater:
         print("done reading rosbag")
 
         # loop through each image, find the closest corresponding data, and save the appropriate data
-        print("Saving {} images and their labels...".format(len(image_msg_list)), end= " ")
+        self.num_imgs = len(image_msg_list)
+        print("Saving {} images and their labels...".format(self.num_imgs), end= " ")
         self.bridge = CvBridge()
         for img_num, img_msg in enumerate(image_msg_list):
             t = img_msg.header.stamp.to_sec()
@@ -165,8 +168,8 @@ class dataset_creater:
                     "width = {}\nheight = {}\nfx = {}\nfy = {}\nu0 = {}\nv0 = {}\n" + \
                     "gpus = {}\nnum_workers = {}\n").format(
                         self.dataset_str,
-                        self.dataset_STR + '/' + self.dataset_str + 'train.txt',
-                        self.dataset_STR + '/' + self.dataset_str + 'test.txt',
+                        self.dataset_STR + '/' + self.dataset_str + '/train.txt',
+                        self.dataset_STR + '/' + self.dataset_str + '/test.txt',
                         'backup/' + self.dataset_str,
                         self.diam,
                         self.bb_l,
@@ -182,6 +185,7 @@ class dataset_creater:
                         self.num_workers)  # mesh = MSLQUAD/mslquad/mslquad.ply
         file.write(write_str)
         file.close()
+        create_test_and_train_lists(min(self.num_train_images, self.num_imgs), min(self.num_test_images, self.num_imgs), self.dataset_STR, self.dataset_str, 'png')
 
 
     def save_dataset_labels(self, img_num, vertex_coords, max_coords, min_coords):

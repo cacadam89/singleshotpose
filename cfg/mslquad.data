@@ -1,6 +1,6 @@
 name = mslquad
-train = MSLQUAD/mslquadtrain.txt
-valid = MSLQUAD/mslquadtest.txt
+train = MSLQUAD/mslquad/train.txt
+valid = MSLQUAD/mslquad/test.txt
 backup = backup/mslquad
 diam = 0.311
 box_length = 0.27
