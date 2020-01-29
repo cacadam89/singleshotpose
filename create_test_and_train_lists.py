@@ -50,11 +50,23 @@ def create_test_and_train_lists(num_train_images, num_test_images, dataset_STR, 
 
 if __name__ == "__main__":
 
-    num_train_images = 1000  # 0 based indexing
-    num_test_images = 1000  # 0 based indexing
-    dataset_STR = 'MSL_QUAD'
-    dataset_str = 'msl_quad'
+    percent_test = 20
+    dataset_STR = 'MSLQUAD'
+    dataset_str = 'mslquad'
     image_extension = 'png'
     
+    # path_to_output_lists = "./{}/{}".format(dataset_STR, dataset_str)
+    # path_to_images = "{}/images".format(path_to_output_lists)
+    # all_images = glob.glob(path_to_images + "/*.{}".format(image_extension))
+    # num_imgs = len(all_images)
+    # if percent_test > 1:
+    #     num_train_images = int(np.ceil(num_imgs * (100 - percent_test) / 100.))
+    #     num_test_images = int(num_imgs - num_train_images)
+    # else:
+    #     num_train_images = int(np.ceil(num_imgs * (1 - percent_test)))
+    #     num_test_images = int(num_imgs - num_train_images)
+    num_train_images = 976
+    num_test_images = 976
+
     create_test_and_train_lists(num_train_images, num_test_images, dataset_STR, dataset_str, image_extension)
     print("Finished!")

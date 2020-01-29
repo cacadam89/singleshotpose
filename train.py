@@ -308,7 +308,11 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt, epoch, batc
     for inds in inds_to_connect:
         open_cv_image = cv2.line(open_cv_image, (corners2D_gt[inds[0],0], corners2D_gt[inds[0],1]), (corners2D_gt[inds[1],0], corners2D_gt[inds[1], 1]), color_gt, linewidth)
         open_cv_image = cv2.line(open_cv_image, (corners2D_pr[inds[0],0], corners2D_pr[inds[0],1]), (corners2D_pr[inds[1],0], corners2D_pr[inds[1], 1]), color_pr, linewidth)
-    cv2.imwrite("./backup/mslquad/test_imgs/epoch_{}_batch_{}_detect_num_{}.jpg".format(epoch, batch_idx, detect_num), open_cv_image)
+    im_save_dir = "./backup/mslquad/test_output_images/"
+    if batch_idx == 0:
+        if not os.path.exists(im_save_dir):
+            os.makedirs(im_save_dir)
+    cv2.imwrite(im_save_dir + "/epoch_{}_batch_{}_detect_num_{}.jpg".format(epoch, batch_idx, detect_num), open_cv_image)
 
     return open_cv_image
 ###########################################################
