@@ -346,3 +346,5 @@ ASALocalRun/
 *.conv.*
 .env
 *.xml
+*.bag
+*.data
