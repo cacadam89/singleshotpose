@@ -1,13 +1,17 @@
 ####### ROS UTILITIES #######
 # IMPORTS
 # system
+import os
 import pdb
 # math
 import numpy as np
 import numpy.linalg as la
 from bisect import bisect_left
+# Vision
+import cv2
+from cv_bridge import CvBridge, CvBridgeError
 # ros
-import rospy
+import rospy, rosbag
 from geometry_msgs.msg import PoseStamped, Twist, Pose
 from sensor_msgs.msg import Image, CameraInfo
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension
@@ -68,3 +72,83 @@ def find_closest_by_time(time_to_match, time_list, message_list=None):
        return message_list[pos], pos
     else:
        return message_list[pos - 1], pos - 1
+
+
+def create_dir_if_missing(my_dir):
+    """ if directory does not exist, create it """
+    if not os.path.exists(my_dir):
+        os.makedirs(my_dir)
+
+
+def read_rosbag(rosbag_dir, input_rosbag, topics, tf_cam_ego):
+    """
+    -Rosbag must contain ego drone's poses, ado drone's poses, the images, and the camera info
+    -Each of these will be returned as a list of ros messages and a list of corresponding times,
+     except for the images which dont need times and the camera info which will be a camera object
+    """
+    ego_pose_msg_list = []
+    ego_pose_msg_time_list = []
+    ado_pose_msg_list = []
+    ado_pose_msg_time_list = []
+    image_msg_list = []
+    time_0 = -1
+    K = None
+    bag_data = rosbag.Bag(rosbag_dir + '/' + input_rosbag)
+    for topic, msg, t in bag_data.read_messages():
+        if topic == topics['image']:
+            if time_0 < 0:
+                time_0 = t.to_sec()
+            image_msg_list.append(msg)
+        elif topic == topics['ego_pose_gt']:
+            ego_pose_msg_list.append(msg)
+            ego_pose_msg_time_list.append(t.to_sec())
+        elif topic == topics['ado_pose_gt']:
+            ado_pose_msg_list.append(msg)
+            ado_pose_msg_time_list.append(t.to_sec())
+        elif K is None and topic == topics['camera_info']:
+            im_w = msg.width
+            im_h = msg.height
+            K = np.reshape(msg.K, (3, 3))
+            dist_coefs = np.reshape(msg.D, (5,))
+    print("done reading rosbag")
+    my_camera = camera(K, dist_coefs, im_w, im_h, tf_cam_ego)
+    return ego_pose_msg_list, ego_pose_msg_time_list, ado_pose_msg_list, ado_pose_msg_time_list, image_msg_list, my_camera
+
+
+class camera:
+    def __init__(self, K, dist_coefs, im_w, im_h, tf_cam_ego):
+        """
+        K: camera intrinsic matrix 
+        tf_cam_ego: camera pose relative to the ego_quad (fixed)
+        fov_horz/fov_vert: Angular field of view (IN RADIANS) for horizontal and vertical directions
+        fov_lim_per_depth: how the boundary of the fov (width, heigh) changes per depth
+        """
+        self.K = K
+        self.dist_coefs = dist_coefs
+        self.im_w = im_w
+        self.im_h = im_h
+        self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(self.K, self.dist_coefs, (im_w, im_h), 0, (im_w, im_h))
+
+        self.K_inv = la.inv(self.K)
+        self.new_camera_matrix_inv = la.inv(self.new_camera_matrix)
+        self.tf_cam_ego = tf_cam_ego
+
+        self.bridge = CvBridge()
+
+    def pnt3d_to_pix(self, pnt_c):
+        """
+        input: assumes pnt in camera frame
+        output: [row, col] i.e. the projection of xyz onto camera plane
+        """
+        rc = np.matmul(self.new_camera_matrix, np.reshape(pnt_c[0:3], 3, 1))
+        rc = np.array([rc[1], rc[0]]) / rc[2]
+        return rc
+
+    def undistort_ros_image(self, img_msg):
+        """
+        input: image as a ros message
+        output: undistorted image as opencv format
+        """
+        image_cv = self.bridge.imgmsg_to_cv2(img_msg, desired_encoding="passthrough")
+        image_cv = cv2.undistort(image_cv, self.K, self.dist_coefs, None, self.new_camera_matrix)
+        return image_cv

@@ -44,10 +44,9 @@ def create_test_and_train_lists(num_train_images, num_test_images, dataset_STR, 
                 file_train.write(save_dir_to_write + "/" + img_name + "\n")
             else:
                 file_test.write(save_dir_to_write + "/" + img_name + "\n")
-
-
     file_train.close()
     file_test.close()
+
 
 if __name__ == "__main__":
 
