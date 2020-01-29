@@ -12,6 +12,9 @@ from darknet import Darknet
 from utils import *
 from MeshPly import MeshPly
 
+from raptor_specific_utils import *
+import pdb
+
 def valid(datacfg, modelcfg, weightfile):
     def truths_length(truths, max_num_gt=50):
         for i in range(max_num_gt):
@@ -21,7 +24,14 @@ def valid(datacfg, modelcfg, weightfile):
     # Parse configuration files
     data_options = read_data_cfg(datacfg)
     valid_images = data_options['valid']
-    meshname     = data_options['mesh']
+    if 'mesh' in data_options:
+        meshname  = data_options['mesh']
+    else:
+        meshname  = None
+        assert('box_length' in data_options)
+        box_length = float(data_options['box_length'])
+        box_width = float(data_options['box_width'])
+        box_height = float(data_options['box_height'])
     backupdir    = data_options['backup']
     name         = data_options['name']
     gpus         = data_options['gpus'] 
@@ -63,15 +73,26 @@ def valid(datacfg, modelcfg, weightfile):
     gts_corners2D       = []
 
     # Read object model information, get 3D bounding box corners
-    mesh      = MeshPly(meshname)
-    vertices  = np.c_[np.array(mesh.vertices), np.ones((len(mesh.vertices), 1))].transpose()
-    corners3D = get_3D_corners(vertices)
-    try:
-        diam  = float(options['diam'])
-    except:
-        diam  = calc_pts_diameter(np.array(mesh.vertices))
+    if meshname is None:
+        # vertices must be 4 x N for compute_projections to work later
+        vertices = np.array([[ box_length/2, box_width/2, box_height/2, 1.],
+                             [ box_length/2, box_width/2,-box_height/2, 1.],
+                             [ box_length/2,-box_width/2,-box_height/2, 1.],
+                             [ box_length/2,-box_width/2, box_height/2, 1.],
+                             [-box_length/2,-box_width/2, box_height/2, 1.],
+                             [-box_length/2,-box_width/2,-box_height/2, 1.],
+                             [-box_length/2, box_width/2,-box_height/2, 1.],
+                             [-box_length/2, box_width/2, box_height/2, 1.]]).T
+        diam  = float(data_options['diam'])
+    else:
+        mesh             = MeshPly(meshname)
+        vertices         = np.c_[np.array(mesh.vertices), np.ones((len(mesh.vertices), 1))].transpose()
+        try:
+            diam  = float(data_options['diam'])
+        except:
+            diam  = calc_pts_diameter(np.array(mesh.vertices))
         
-    # Read intrinsic camera parameters
+    corners3D            = get_3D_corners(vertices)
     intrinsic_calibration = get_camera_intrinsic(u0, v0, fx, fy)
 
     # Get validation file names
@@ -147,6 +168,9 @@ def valid(datacfg, modelcfg, weightfile):
                 corner_norm = np.linalg.norm(corners2D_gt - corners2D_pr, axis=1)
                 corner_dist = np.mean(corner_norm)
                 errs_corner2D.append(corner_dist)
+
+                # [OPTIONAL] generate images with bb drawn on them
+                draw_2d_proj_of_3D_bounding_box(data, corners2D_pr, corners2D_gt, None, batch_idx, k, im_save_dir = "./backup/{}/valid_output_images/".format(name))
                 
                 # Compute [R|t] by pnp
                 R_gt, t_gt = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_gt, np.array(intrinsic_calibration, dtype='float32'))
