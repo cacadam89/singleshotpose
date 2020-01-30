@@ -5,18 +5,19 @@ import os
 import random
 from PIL import Image
 import numpy as np
+import numpy.linalg as la
 from image import *
 import torch
 
 from torch.utils.data import Dataset
-from utils import read_truths_args, read_truths, get_all_files
+from utils import read_truths_args, read_truths, get_all_files, pnp
 from raptor_camera import camera
 import pdb
 
 
 class listDataset(Dataset):
 
-    def __init__(self, root, shape=None, shuffle=True, transform=None, target_transform=None, train=False, seen=0, batch_size=64, num_workers=4, cell_size=32, bg_file_names=None, num_keypoints=9, max_num_gt=50, cam_params=None):
+    def __init__(self, root, shape=None, shuffle=True, transform=None, target_transform=None, train=False, seen=0, batch_size=64, num_workers=4, cell_size=32, bg_file_names=None, num_keypoints=9, max_num_gt=50, cam_params=None, corners3D=None):
 
         # root             : list of training or test images
         # shape            : shape of the image input to the network
@@ -70,21 +71,18 @@ class listDataset(Dataset):
                     box_gt.extend([1.0, 1.0])
                     box_gt.append(truths[k][0])
                 corners2D_gt = np.array(np.reshape(box_gt[:18], [-1, 2]), dtype='float32')
-                if np.any(corners2D_gt < 0) or np.any(corners2D_gt > 1):
+                corners2D_gt[:, 0] = corners2D_gt[:, 0] * my_camera.im_w
+                corners2D_gt[:, 1] = corners2D_gt[:, 1] * my_camera.im_h
+
+                R_gt, t_gt = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), corners3D[:3, :]), axis=1)), dtype='float32'), corners2D_gt, np.array(my_camera.K, dtype='float32'))
+                MAX_DIST_TO_KEEP = 5
+                if np.any(corners2D_gt < 0) or np.any(corners2D_gt[:, 0] > my_camera.im_w) or np.any(corners2D_gt[:, 1] > my_camera.im_h) or la.norm(t_gt) > MAX_DIST_TO_KEEP:
                     keep_list.append(False)
                 else:
                     keep_list.append(True)
-                    # print("failure detected")
-                    # pdb.set_trace()
-            # pdb.set_trace()
-            # print(len(keep_list))
-            # self.lines = [l for (i, l) in enumerate(self.lines) if keep_list[i]]
+                
             self.lines = [l for (l, my_bool) in zip(self.lines, keep_list) if my_bool]
             print('Keeping {} / {} images (throwing out images with no drone in FOV)'.format(len(self.lines), num_img))
-            # pdb.set_trace()
-
-
-    
 
         # Shuffle
         if shuffle:

@@ -119,11 +119,7 @@ def valid(datacfg, modelcfg, weightfile):
     im_width     = int(data_options['width'])
     im_height    = int(data_options['height'])
 
-    K = np.eye(3)
-    K[0, 0] = fx
-    K[1, 1] = fy
-    K[0, 2] = im_width / 2.
-    K[1, 2] = im_height / 2.
+    K = get_camera_intrinsic(u0, v0, fx, fy)
     dist_coefs = None
     tf_cam_ego = None
     cam_params = (K, dist_coefs, im_width, im_height, tf_cam_ego)
@@ -131,7 +127,8 @@ def valid(datacfg, modelcfg, weightfile):
                                         shape=(test_width, test_height),
                                         shuffle=False,
                                         transform=transforms.Compose([transforms.ToTensor(),]),
-                                        cam_params=cam_params)
+                                        cam_params=cam_params,
+                                        corners3D=corners3D)
 
     # Specify the number of workers for multiple processing, get the dataloader for the test dataset
     kwargs = {'num_workers': 4, 'pin_memory': True}
@@ -215,6 +212,8 @@ def valid(datacfg, modelcfg, weightfile):
                 norm3d            = np.linalg.norm(transform_3d_gt - transform_3d_pred, axis=0)
                 vertex_dist       = np.mean(norm3d)    
                 errs_3d.append(vertex_dist)  
+                
+                # pdb.set_trace()
 
                 # Sum errors
                 testing_error_trans  += trans_dist
