@@ -35,15 +35,14 @@ class listDataset(Dataset):
             self.lines = file.readlines()
 
         if cam_params is not None:
+            # reject any gt's that are not in FOV!! (or are too far away)
             keep_list = []
             box_gt = []
             def truths_length(truths, max_num_gt=50):
                 for i in range(max_num_gt):
                     if truths[i][1] == 0:
                         return i
-            # cam_params = (K, dist_coefs, im_width, im_height, tf_cam_ego)
-            # reject any gt's that are not in FOV!
-            my_camera = camera(*cam_params) 
+            my_camera = camera(*cam_params)  # cam_params = (K, dist_coefs, im_width, im_height, tf_cam_ego)
             for l in self.lines:
                 # Get the image path
                 num_img = len(self.lines)
@@ -75,13 +74,15 @@ class listDataset(Dataset):
                 corners2D_gt[:, 1] = corners2D_gt[:, 1] * my_camera.im_h
 
                 R_gt, t_gt = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), corners3D[:3, :]), axis=1)), dtype='float32'), corners2D_gt, np.array(my_camera.K, dtype='float32'))
-                MAX_DIST_TO_KEEP = 5
+                MAX_DIST_TO_KEEP = 4
                 if np.any(corners2D_gt < 0) or np.any(corners2D_gt[:, 0] > my_camera.im_w) or np.any(corners2D_gt[:, 1] > my_camera.im_h) or la.norm(t_gt) > MAX_DIST_TO_KEEP:
                     keep_list.append(False)
                 else:
                     keep_list.append(True)
                 
             self.lines = [l for (l, my_bool) in zip(self.lines, keep_list) if my_bool]
+            if len(self.lines) == 0:
+                raise RuntimeError("ALL IMAGES SCREENED OUT (out of original {} images)".format(num_img))
             print('Keeping {} / {} images (throwing out images with no drone in FOV)'.format(len(self.lines), num_img))
 
         # Shuffle
