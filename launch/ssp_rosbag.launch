@@ -1,0 +1,17 @@
+<launch>
+  <arg name="rb_name"         default="rosbag_for_post_process_2019-12-18-02-10-28" /> <!-- name of the rosbag -->
+  <arg name="id"              default="7" />
+  <arg name="robot_type"      default="quad" />
+  <arg name="ns"              value="/$(arg robot_type)$(arg id)" />
+
+  <!-- Use sim time for reading from rosbag -->
+  <param name="use_sim_time" value="true" />
+
+  <!-- Play rosbag -->
+  <node pkg="rosbag" type="play" name="player" args="--clock $(find singleshotpose)/rosbags/$(arg rb_name).bag"/>
+
+  <!-- Launch our main node -->
+  <node name="SSP_baseline_eval" pkg="ssp" type="baseline_eval.py" output="screen">
+    <param name="ns"  value="$(arg ns)"/> 
+  </node>
+</launch>
