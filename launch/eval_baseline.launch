@@ -7,8 +7,8 @@
   <arg name="b_enforce_0_yaw" default="true" />
   <arg name="detection_period" default="5" /> <!-- period to use to redo safety detection in seconds -->
   <arg name="b_rosbag"        default="false" />  <!-- boolean if we are reading data from a rosbag -->
-  <arg name="rb_path"         default="/bags" />  <!-- path to the rosbag -->
-  <arg name="rb_name"         default="rosbag_for_post_process_2019-11-13-13-30-13" /> <!-- name of the rosbag -->
+  <arg name="rb_path"         default="/rosbags" />  <!-- path to the rosbag -->
+  <arg name="rb_name"         default="rosbag_for_post_process_2019-12-18-02-10-28" /> <!-- name of the rosbag -->
   <arg name="b_record"        default="false" />  <!-- boolean if we are recording data in rosbag -->
   <arg name="rb_start_delay"  default="2.0" /> <!-- how long to delay the start of the rosbag -->
   
@@ -24,6 +24,5 @@
     <param name="ns"  value="$(arg ns)"/> 
     <!-- <rosparam command="load" file="$(find msl_raptor)/params/$(arg robot_type)$(arg id).yaml" /> -->
   </node>
-  </group>
 
 </launch>
