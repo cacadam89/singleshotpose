@@ -6,7 +6,7 @@ import pdb
 def create_test_and_train_lists(num_train_images, num_test_images, dataset_STR, dataset_str, image_extension):
     if image_extension[0] == '.':
         image_extension = image_extension[1:]
-    save_dir_to_write = "/root/singleshotpose/{}/{}/images".format(dataset_STR, dataset_str)
+    save_dir_to_write = "/root/ssp_ws/src/singleshotpose/{}/{}/images".format(dataset_STR, dataset_str)
     path_to_output_lists = "./{}/{}".format(dataset_STR, dataset_str)
     path_to_images = "{}/images".format(path_to_output_lists)
     all_images = glob.glob(path_to_images + "/*.{}".format(image_extension))
