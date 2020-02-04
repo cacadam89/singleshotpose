@@ -1,285 +1,181 @@
-import os
+#!/usr/bin/env python3
+import pdb
+import os, sys
 import time
 import torch
-import argparse
 import scipy.io
 import warnings
 from torch.autograd import Variable
 from torchvision import datasets, transforms
 
-import dataset
 from darknet import Darknet
 from utils import *
 from MeshPly import MeshPly
 
 from raptor_specific_utils import *
-import pdb
 
-def eval_baseline(datacfg, modelcfg, weightfile):
-    def truths_length(truths, max_num_gt=50):
+import cv2
+from cv_bridge import CvBridge, CvBridgeError
+# ros
+import rospy
+from geometry_msgs.msg import PoseStamped, Twist, Pose
+from sensor_msgs.msg import Image, CameraInfo
+from std_msgs.msg import Float32MultiArray, MultiArrayDimension
+
+class ssp_rosbag:
+    def __init__(self):
+        rospy.init_node('eval_baseline', anonymous=True)
+
+        ##############################################################################
+        ##############################################################################
+        ##############################################################################
+        self.ns = rospy.get_param('~ns')  # robot namespace
+        modelcfg = rospy.get_param('~modelcfg')
+        weightfile = rospy.get_param('~weightfile')
+        datacfg = rospy.get_param('~datacfg')
+
+        # Parse configuration files
+        data_options = read_data_cfg(datacfg)
+        valid_images = data_options['valid']
+
+        if 'mesh' in data_options:
+            meshname  = data_options['mesh']
+        else:
+            meshname  = None
+            assert('box_length' in data_options)
+            box_length = float(data_options['box_length'])
+            box_width = float(data_options['box_width'])
+            box_height = float(data_options['box_height'])
+
+        name         = data_options['name']
+        gpus         = data_options['gpus'] 
+        self.im_width     = int(data_options['width'])
+        self.im_height    = int(data_options['height'])
+
+         # Parameters
+        seed = int(time.time())
+        os.environ['CUDA_VISIBLE_DEVICES'] = gpus
+        torch.cuda.manual_seed(seed)
+        num_classes = 1
+
+        # Read object model information, get 3D bounding box corners
+        if meshname is None:
+            # vertices must be 4 x N for compute_projections to work later
+            vertices = np.array([[ box_length/2, box_width/2, box_height/2, 1.],
+                                [ box_length/2, box_width/2,-box_height/2, 1.],
+                                [ box_length/2,-box_width/2,-box_height/2, 1.],
+                                [ box_length/2,-box_width/2, box_height/2, 1.],
+                                [-box_length/2,-box_width/2, box_height/2, 1.],
+                                [-box_length/2,-box_width/2,-box_height/2, 1.],
+                                [-box_length/2, box_width/2,-box_height/2, 1.],
+                                [-box_length/2, box_width/2, box_height/2, 1.]]).T
+            diam  = float(data_options['diam'])
+        else:
+            mesh             = MeshPly(meshname)
+            vertices         = np.c_[np.array(mesh.vertices), np.ones((len(mesh.vertices), 1))].transpose()
+            try:
+                diam  = float(data_options['diam'])
+            except:
+                diam  = calc_pts_diameter(np.array(mesh.vertices))
+            
+        self.corners3D            = get_3D_corners(vertices)
+        # self.K = get_camera_intrinsic(u0, v0, fx, fy)
+
+        # Specicy model, load pretrained weights, pass to GPU and set the module in evaluation mode
+        self.model = Darknet(modelcfg)
+        self.model.print_network()
+        self.model.load_weights(weightfile)
+        self.model.cuda()
+        self.model.eval()
+        self.shape = (self.model.test_width, self.model.test_height)
+        num_keypoints = self.model.num_keypoints 
+        num_labels    = num_keypoints * 2 + 3 # +2 for width, height,  +1 for class label
+        ##############################################################################
+        ##############################################################################
+        ##############################################################################
+
+        self.itr = 0
+        self.bridge = CvBridge()
+        self.img_buffer = ([], [])
+        self.img_rosmesg_buffer_len = 10
+
+
+        camera_info = rospy.wait_for_message(self.ns + '/camera/camera_info', CameraInfo, 30)
+        self.K = np.reshape(camera_info.K, (3, 3))
+        self.dist_coefs = np.reshape(camera_info.D, (5,))
+        self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(self.K, self.dist_coefs, (camera_info.width, camera_info.height), 1, (camera_info.width, camera_info.height))
+        rospy.Subscriber(self.ns + '/camera/image_raw', Image, self.image_cb, queue_size=1,buff_size=2**21)
+        
+
+    def image_cb(self, msg):
+        """
+        Maintains a buffer of images & times. The first element is the earliest. 
+        Stored in a way to interface with a quick method for finding closest match by time.
+        """
+
+        # im_msg = self.find_closest_by_time_ros2(my_time, self.img_buffer[1], self.img_buffer[0])[0]
+        image = self.bridge.imgmsg_to_cv2(im_msg, desired_encoding="passthrough")
+        img = cv2.undistort(image, self.K, self.dist_coefs, None, self.new_camera_matrix)
+        
+        # img = Image.open(imgpath).convert('RGB')
+        img = img.resize(self.shape)
+        img = img.cuda()
+        img = Variable(img, volatile=True)
+        
+        output = self.model(data).data   # Forward pass
+        
+        # Using confidence threshold, eliminate low-confidence predictions
+        all_boxes = get_region_boxes(output, num_classes, num_keypoints)   
+        
+        # Denormalize the corner predictions 
+        corners2D_pr = np.array(np.reshape(box_pr[:18], [-1, 2]), dtype='float32')
+        corners2D_pr[:, 0] = corners2D_pr[:, 0] * self.im_width
+        corners2D_pr[:, 1] = corners2D_pr[:, 1] * self.im_height
+        # preds_corners2D.append(corners2D_pr)
+
+         # [OPTIONAL] generate images with bb drawn on them
+        # draw_2d_proj_of_3D_bounding_box(data, corners2D_pr, corners2D_gt, None, batch_idx, k, im_save_dir = "./backup/{}/valid_output_images/".format(name))
+        
+        # Compute [R|t] by pnp
+        R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), self.corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(self.K, dtype='float32'))
+        
+        self.itr += 1
+
+
+    def truths_length(self, truths, max_num_gt=50):
         for i in range(max_num_gt):
             if truths[i][1] == 0:
                 return i
 
-    # Parse configuration files
-    data_options = read_data_cfg(datacfg)
-    valid_images = data_options['valid']
-    if 'mesh' in data_options:
-        meshname  = data_options['mesh']
-    else:
-        meshname  = None
-        assert('box_length' in data_options)
-        box_length = float(data_options['box_length'])
-        box_width = float(data_options['box_width'])
-        box_height = float(data_options['box_height'])
-    backupdir    = data_options['backup']
-    name         = data_options['name']
-    gpus         = data_options['gpus'] 
-    fx           = float(data_options['fx'])
-    fy           = float(data_options['fy'])
-    u0           = float(data_options['u0'])
-    v0           = float(data_options['v0'])
-    im_width     = int(data_options['width'])
-    im_height    = int(data_options['height'])
-    if not os.path.exists(backupdir):
-        makedirs(backupdir)
+    def find_closest_by_time_ros2(self, time_to_match, time_list, message_list=None):
+        """
+        Assumes lists are sorted earlier to later. Returns closest item in list by time. If two numbers are equally close, return the smallest number.
+        Adapted from https://stackoverflow.com/questions/12141150/from-list-of-integers-get-number-closest-to-a-given-value/12141511#12141511
+        """
+        if not message_list:
+            message_list = time_list
+        pos = bisect_left(time_list, time_to_match)
+        if pos == 0:
+            return message_list[0], 0
+        if pos == len(time_list):
+            return message_list[-1], len(message_list) - 1
+        before = time_list[pos - 1]
+        after = time_list[pos]
+        if after - time_to_match < time_to_match - before:
+            return message_list[pos], pos
+        else:
+            return message_list[pos - 1], pos - 1
 
-    # Parameters
-    seed = int(time.time())
-    os.environ['CUDA_VISIBLE_DEVICES'] = gpus
-    torch.cuda.manual_seed(seed)
-    save            = False
-    testtime        = True
-    num_classes     = 1
-    testing_samples = 0.0
-    if save:
-        makedirs(backupdir + '/test')
-        makedirs(backupdir + '/test/gt')
-        makedirs(backupdir + '/test/pr')
-    # To save
-    testing_error_trans = 0.0
-    testing_error_angle = 0.0
-    testing_error_pixel = 0.0
-    errs_2d             = []
-    errs_3d             = []
-    errs_trans          = []
-    errs_angle          = []
-    errs_corner2D       = []
-    preds_trans         = []
-    preds_rot           = []
-    preds_corners2D     = []
-    gts_trans           = []
-    gts_rot             = []
-    gts_corners2D       = []
+    def run(self):
+        rate = rospy.Rate(100)
+        while not rospy.is_shutdown():
+            rate.sleep()
 
-    # Read object model information, get 3D bounding box corners
-    if meshname is None:
-        # vertices must be 4 x N for compute_projections to work later
-        vertices = np.array([[ box_length/2, box_width/2, box_height/2, 1.],
-                             [ box_length/2, box_width/2,-box_height/2, 1.],
-                             [ box_length/2,-box_width/2,-box_height/2, 1.],
-                             [ box_length/2,-box_width/2, box_height/2, 1.],
-                             [-box_length/2,-box_width/2, box_height/2, 1.],
-                             [-box_length/2,-box_width/2,-box_height/2, 1.],
-                             [-box_length/2, box_width/2,-box_height/2, 1.],
-                             [-box_length/2, box_width/2, box_height/2, 1.]]).T
-        diam  = float(data_options['diam'])
-    else:
-        mesh             = MeshPly(meshname)
-        vertices         = np.c_[np.array(mesh.vertices), np.ones((len(mesh.vertices), 1))].transpose()
-        try:
-            diam  = float(data_options['diam'])
-        except:
-            diam  = calc_pts_diameter(np.array(mesh.vertices))
-        
-    corners3D            = get_3D_corners(vertices)
-    intrinsic_calibration = get_camera_intrinsic(u0, v0, fx, fy)
-
-    # Get validation file names
-    with open(valid_images) as fp:
-        tmp_files = fp.readlines()
-        valid_files = [item.rstrip() for item in tmp_files]
-    
-    # Specicy model, load pretrained weights, pass to GPU and set the module in evaluation mode
-    model = Darknet(modelcfg)
-    model.print_network()
-    model.load_weights(weightfile)
-    model.cuda()
-    model.eval()
-    test_width    = model.test_width
-    test_height   = model.test_height
-    num_keypoints = model.num_keypoints 
-    num_labels    = num_keypoints * 2 + 3 # +2 for width, height,  +1 for class label
-
-    # Get the parser for the test dataset
-    fx           = float(data_options['fx'])
-    fy           = float(data_options['fy'])
-    u0           = float(data_options['u0'])
-    v0           = float(data_options['v0'])
-    im_width     = int(data_options['width'])
-    im_height    = int(data_options['height'])
-
-    K = get_camera_intrinsic(u0, v0, fx, fy)
-    dist_coefs = None
-    tf_cam_ego = None
-    cam_params = (K, dist_coefs, im_width, im_height, tf_cam_ego)
-    valid_dataset = dataset.listDataset(valid_images, 
-                                        shape=(test_width, test_height),
-                                        shuffle=False,
-                                        transform=transforms.Compose([transforms.ToTensor(),]),
-                                        cam_params=cam_params,
-                                        corners3D=corners3D)
-
-    # Specify the number of workers for multiple processing, get the dataloader for the test dataset
-    kwargs = {'num_workers': 4, 'pin_memory': True}
-    test_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=1, shuffle=False, **kwargs) 
-
-    logging("   Testing {}...".format(name))
-    logging("   Number of test samples: %d" % len(test_loader.dataset))
-    # Iterate through test batches (Batch size for test data is 1)
-    count = 0
-    for batch_idx, (data, target) in enumerate(test_loader):
-        t1 = time.time()
-        # Pass data to GPU
-        data = data.cuda()
-        target = target.cuda()
-        # Wrap tensors in Variable class, set volatile=True for inference mode and to use minimal memory during inference
-        data = Variable(data, volatile=True)
-        t2 = time.time()
-        # Forward pass
-        output = model(data).data  
-        t3 = time.time()
-        # Using confidence threshold, eliminate low-confidence predictions
-        all_boxes = get_region_boxes(output, num_classes, num_keypoints)        
-        t4 = time.time()
-        # Evaluation
-        # Iterate through all batch elements
-        for box_pr, target in zip([all_boxes], [target[0]]):
-            # For each image, get all the targets (for multiple object pose estimation, there might be more than 1 target per image)
-            truths = target.view(-1, num_labels)
-            # Get how many objects are present in the scene
-            num_gts    = truths_length(truths)
-            # Iterate through each ground-truth object
-            for k in range(num_gts):
-                box_gt = list()
-                for j in range(1, 2*num_keypoints+1):
-                    box_gt.append(truths[k][j])
-                box_gt.extend([1.0, 1.0])
-                box_gt.append(truths[k][0])
-
-                # Denormalize the corner predictions 
-                corners2D_gt = np.array(np.reshape(box_gt[:18], [-1, 2]), dtype='float32')
-                corners2D_pr = np.array(np.reshape(box_pr[:18], [-1, 2]), dtype='float32')
-                corners2D_gt[:, 0] = corners2D_gt[:, 0] * im_width
-                corners2D_gt[:, 1] = corners2D_gt[:, 1] * im_height          
-                corners2D_pr[:, 0] = corners2D_pr[:, 0] * im_width
-                corners2D_pr[:, 1] = corners2D_pr[:, 1] * im_height
-                preds_corners2D.append(corners2D_pr)
-                gts_corners2D.append(corners2D_gt)
-
-                # Compute corner prediction error
-                corner_norm = np.linalg.norm(corners2D_gt - corners2D_pr, axis=1)
-                corner_dist = np.mean(corner_norm)
-                errs_corner2D.append(corner_dist)
-
-                # [OPTIONAL] generate images with bb drawn on them
-                draw_2d_proj_of_3D_bounding_box(data, corners2D_pr, corners2D_gt, None, batch_idx, k, im_save_dir = "./backup/{}/valid_output_images/".format(name))
-                
-                # Compute [R|t] by pnp
-                R_gt, t_gt = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_gt, np.array(intrinsic_calibration, dtype='float32'))
-                R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(intrinsic_calibration, dtype='float32'))
-                
-                # Compute translation error
-                trans_dist   = np.sqrt(np.sum(np.square(t_gt - t_pr)))
-                errs_trans.append(trans_dist)
-                
-                # Compute angle error
-                angle_dist   = calcAngularDistance(R_gt, R_pr)
-                errs_angle.append(angle_dist)
-                
-                # Compute pixel error
-                Rt_gt        = np.concatenate((R_gt, t_gt), axis=1)
-                Rt_pr        = np.concatenate((R_pr, t_pr), axis=1)
-                proj_2d_gt   = compute_projection(vertices, Rt_gt, intrinsic_calibration)
-                proj_2d_pred = compute_projection(vertices, Rt_pr, intrinsic_calibration) 
-                norm         = np.linalg.norm(proj_2d_gt - proj_2d_pred, axis=0)
-                pixel_dist   = np.mean(norm)
-                errs_2d.append(pixel_dist)
-
-                # Compute 3D distances
-                transform_3d_gt   = compute_transformation(vertices, Rt_gt) 
-                transform_3d_pred = compute_transformation(vertices, Rt_pr)  
-                norm3d            = np.linalg.norm(transform_3d_gt - transform_3d_pred, axis=0)
-                vertex_dist       = np.mean(norm3d)    
-                errs_3d.append(vertex_dist)  
-                
-                # pdb.set_trace()
-
-                # Sum errors
-                testing_error_trans  += trans_dist
-                testing_error_angle  += angle_dist
-                testing_error_pixel  += pixel_dist
-                testing_samples      += 1
-                count = count + 1
-
-                if save:
-                    preds_trans.append(t_pr)
-                    gts_trans.append(t_gt)
-                    preds_rot.append(R_pr)
-                    gts_rot.append(R_gt)
-
-                    np.savetxt(backupdir + '/test/gt/R_' + valid_files[count][-8:-3] + 'txt', np.array(R_gt, dtype='float32'))
-                    np.savetxt(backupdir + '/test/gt/t_' + valid_files[count][-8:-3] + 'txt', np.array(t_gt, dtype='float32'))
-                    np.savetxt(backupdir + '/test/pr/R_' + valid_files[count][-8:-3] + 'txt', np.array(R_pr, dtype='float32'))
-                    np.savetxt(backupdir + '/test/pr/t_' + valid_files[count][-8:-3] + 'txt', np.array(t_pr, dtype='float32'))
-                    np.savetxt(backupdir + '/test/gt/corners_' + valid_files[count][-8:-3] + 'txt', np.array(corners2D_gt, dtype='float32'))
-                    np.savetxt(backupdir + '/test/pr/corners_' + valid_files[count][-8:-3] + 'txt', np.array(corners2D_pr, dtype='float32'))
-
-
-        t5 = time.time()
-
-    # Compute 2D projection error, 6D pose error, 5cm5degree error
-    px_threshold = 5 # 5 pixel threshold for 2D reprojection error is standard in recent sota 6D object pose estimation works 
-    eps          = 1e-5
-    acc          = len(np.where(np.array(errs_2d) <= px_threshold)[0]) * 100. / (len(errs_2d)+eps)
-    acc5cm5deg   = len(np.where((np.array(errs_trans) <= 0.05) & (np.array(errs_angle) <= 5))[0]) * 100. / (len(errs_trans)+eps)
-    acc3d10      = len(np.where(np.array(errs_3d) <= diam * 0.1)[0]) * 100. / (len(errs_3d)+eps)
-    acc5cm5deg   = len(np.where((np.array(errs_trans) <= 0.05) & (np.array(errs_angle) <= 5))[0]) * 100. / (len(errs_trans)+eps)
-    corner_acc   = len(np.where(np.array(errs_corner2D) <= px_threshold)[0]) * 100. / (len(errs_corner2D)+eps)
-    mean_err_2d  = np.mean(errs_2d)
-    mean_corner_err_2d = np.mean(errs_corner2D)
-    nts = float(testing_samples)
-
-    if testtime:
-        print('-----------------------------------')
-        print('  tensor to cuda : %f' % (t2 - t1))
-        print('    forward pass : %f' % (t3 - t2))
-        print('get_region_boxes : %f' % (t4 - t3))
-        print(' prediction time : %f' % (t4 - t1))
-        print('            eval : %f' % (t5 - t4))
-        print('-----------------------------------')
-
-    # Print test statistics
-    logging('Results of {}'.format(name))
-    logging('   Acc using {} px 2D Projection = {:.2f}%'.format(px_threshold, acc))
-    logging('   Acc using 10% threshold - {} vx 3D Transformation = {:.2f}%'.format(diam * 0.1, acc3d10))
-    logging('   Acc using 5 cm 5 degree metric = {:.2f}%'.format(acc5cm5deg))
-    logging("   Mean 2D pixel error is %f, Mean vertex error is %f, mean corner error is %f" % (mean_err_2d, np.mean(errs_3d), mean_corner_err_2d))
-    logging('   Translation error: %f m, angle error: %f degree, pixel error: % f pix' % (testing_error_trans/nts, testing_error_angle/nts, testing_error_pixel/nts) )
-
-    if save:
-        predfile = backupdir + '/predictions_linemod_' + name +  '.mat'
-        scipy.io.savemat(predfile, {'R_gts': gts_rot, 't_gts':gts_trans, 'corner_gts': gts_corners2D, 'R_prs': preds_rot, 't_prs':preds_trans, 'corner_prs': preds_corners2D})
 
 if __name__ == '__main__':
-
-    # Parse configuration files
-    parser = argparse.ArgumentParser(description='SingleShotPose')
-    parser.add_argument('--datacfg', type=str, default='cfg/ape.data') # data config
-    parser.add_argument('--modelcfg', type=str, default='cfg/yolo-pose.cfg') # network config
-    parser.add_argument('--weightfile', type=str, default='backup/ape/model_backup.weights') # imagenet initialized weights
-    args       = parser.parse_args()
-    datacfg    = args.datacfg
-    modelcfg   = args.modelcfg
-    weightfile = args.weightfile
-    eval_baseline(datacfg, modelcfg, weightfile)
+    try:
+        program = ssp_rosbag()
+        program.run()
+    except:
+        import traceback
+        traceback.print_exc()

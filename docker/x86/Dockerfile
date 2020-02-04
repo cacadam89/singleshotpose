@@ -4,17 +4,20 @@ WORKDIR /root
 # Change default shell for RUN per https://stackoverflow.com/questions/20635472/using-the-run-instruction-in-a-dockerfile-with-source-does-not-work/39777387#39777387
 SHELL ["/bin/bash", "-c"]
 
-# Make directories
-# RUN mkdir -p /root/ssp_ws/src/singleshotpose
 
-# Clone and build singleshotpose
-RUN source /ros_python3_entrypoint.sh && \
-    mkdir ssp_ws && cd ssp_ws && \
-    mkdir src && \
-    cd  src && \
-    git clone https://github.com/cacadam89/singleshotpose.git singleshotpose && \
-    cd .. && \
-    catkin build
+# [IF NOT MOUNTING CODE!!] Clone and build singleshotpose
+# RUN source /ros_python3_entrypoint.sh && \
+#     mkdir ssp_ws && cd ssp_ws && \
+#     mkdir src && \
+#     cd  src && \
+#     git clone https://github.com/cacadam89/singleshotpose.git singleshotpose && \
+#     cd .. && \
+#     catkin build
+
+# [ELSE!!] Make directories
+# RUN mkdir -p /root/ssp_ws/src/singleshotpose && \
+#     cd /root/ssp_ws && \
+#     catkin_make
 
 COPY ./requirements.txt /root/ssp_ws/src/singleshotpose/
 
@@ -45,10 +48,9 @@ RUN echo 'alias test_train_go="cd /root/ssp_ws/src/singleshotpose/ && python3 tr
     echo 'alias train_go="cd /root/ssp_ws/src/singleshotpose/ && python3 -m pdb train.py --datacfg cfg/mslquad.data --modelcfg cfg/yolo-pose.cfg --initweightfile cfg/darknet19_448.conv.23 --pretrain_num_epochs 15"' >> ~/.bashrc && \
     echo 'alias validate_go="cd /root/ssp_ws/src/singleshotpose/ && python3 valid.py --datacfg cfg/mslquad.data --modelcfg cfg/yolo-pose.cfg --weightfile backup/mslquad/model.weights"' >> ~/.bashrc
 
-RUN source /ros_python3_entrypoint.sh && \
-    cd ssp_ws/src/singleshotpose && \
-    git pull && \
-    catkin build
+# RUN source /ros_python3_entrypoint.sh && \
+#     cd ssp_ws/src/singleshotpose && \
+#     catkin build
 
 COPY ./singleshot_entrypoint.sh /
 ENTRYPOINT ["/singleshot_entrypoint.sh"]
