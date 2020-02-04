@@ -29,6 +29,17 @@ def pose_to_tf(pose):
     return tf_w_q
 
 
+def rotm_and_t_to_tf(rotm, t):
+    """ 
+    calculate the rotation matrix of a given quaternion (frames assumed to be consistant 
+    with the UKF state quaternion). First element of quat is the scalar.
+    """
+    tf_out = np.eye(4)
+    tf_out[0:3, 0:3] = rotm
+    tf_out[0:3, 3] = t
+    return tf_out
+
+
 def quat_to_rotm(quat):
     """ 
     calculate the rotation matrix of a given quaternion (frames assumed to be consistant 

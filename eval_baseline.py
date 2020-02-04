@@ -97,19 +97,61 @@ class ssp_rosbag:
         ##############################################################################
         ##############################################################################
 
-        self.latest_msg = None
+        self.latest_msg = None  # debug - can probably delete this 
         self.itr = 0
         self.bridge = CvBridge()
-        self.img_buffer = ([], [])
-        self.img_rosmesg_buffer_len = 10
+        self.pose_buffer_len = 20
+        self.ado_pose_msg_buf = []
+        self.ego_pose_msg_buf = []
+        self.ado_pose_time_msg_buf = []
+        self.ego_pose_time_msg_buf = []
+
+        # Create camera (camera extrinsics from quad7.param in the msl_raptor project):
+        self.tf_cam_ego = np.eye(4)
+        self.tf_cam_ego[0:3, 3] = np.asarray([0.01504337, -0.06380886, -0.13854437])
+        self.tf_cam_ego[0:3, 0:3] = np.reshape([-6.82621737e-04, -9.99890488e-01, -1.47832690e-02, 3.50423970e-02,  1.47502748e-02, -9.99276969e-01, 9.99385593e-01, -1.20016936e-03,  3.50284906e-02], (3, 3))
+        
+        # Correct Rotation w/ Manual Calibration
+        Angle_x = 8./180. 
+        Angle_y = 8./180.
+        Angle_z = 0./180. 
+        R_deltax = np.array([[ 1.             , 0.             , 0.              ],
+                             [ 0.             , np.cos(Angle_x),-np.sin(Angle_x) ],
+                             [ 0.             , np.sin(Angle_x), np.cos(Angle_x) ]])
+        R_deltay = np.array([[ np.cos(Angle_y), 0.             , np.sin(Angle_y) ],
+                             [ 0.             , 1.             , 0               ],
+                             [-np.sin(Angle_y), 0.             , np.cos(Angle_y) ]])
+        R_deltaz = np.array([[ np.cos(Angle_z),-np.sin(Angle_z), 0.              ],
+                             [ np.sin(Angle_z), np.cos(Angle_z), 0.              ],
+                             [ 0.             , 0.             , 1.              ]])
+        R_delta = np.dot(R_deltax, np.dot(R_deltay, R_deltaz))
+        self.tf_cam_ego[0:3,0:3] = np.matmul(R_delta, self.tf_cam_ego[0:3,0:3])
+        #########################################################################################
 
 
         camera_info = rospy.wait_for_message(self.ns + '/camera/camera_info', CameraInfo, 30)
         self.K = np.reshape(camera_info.K, (3, 3))
         self.dist_coefs = np.reshape(camera_info.D, (5,))
         self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(self.K, self.dist_coefs, (camera_info.width, camera_info.height), 1, (camera_info.width, camera_info.height))
+        rospy.Subscriber(self.ns + '/mavros/vision_pose/pose', PoseStamped, self.ego_pose_gt_cb, queue_size=10)  # optitrack pose
         rospy.Subscriber(self.ns + '/camera/image_raw', Image, self.image_cb, queue_size=1,buff_size=2**21)
+        rospy.Subscriber('/quad4' + '/mavros/vision_pose/pose', PoseStamped, self.ado_pose_gt_cb, queue_size=10)  # DEBUG ONLY - optitrack pose
+
         
+
+    def ado_pose_gt_cb(self, msg):
+        self.ado_pose_gt_rosmsg = msg.pose
+        pose_tm = msg.header.stamp.to_sec()
+        self.ado_pose_msg_buf.append(msg)
+        self.ado_pose_time_msg_buf.append(pose_tm)
+
+
+    def ego_pose_gt_cb(self, msg):
+        self.ego_pose_gt_rosmsg = msg.pose
+        pose_tm = msg.header.stamp.to_sec()
+        self.ego_pose_msg_buf.append(msg)
+        self.ego_pose_time_msg_buf.append(pose_tm)
+
 
     def image_cb(self, msg):
         """
@@ -118,9 +160,11 @@ class ssp_rosbag:
         """
         self.latest_msg = msg
 
+
     def ssp_image(self):
         print("new image (itr {}".format(self.itr))
         msg = copy(self.latest_msg)
+        img_tm = msg.header.stamp.to_sec()
         img = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         img = cv2.undistort(img, self.K, self.dist_coefs, None, self.new_camera_matrix)
         img = PIL.Image.fromarray(img).resize(self.shape)
@@ -143,9 +187,20 @@ class ssp_rosbag:
         
         # Compute [R|t] by pnp
         R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), self.corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(self.K, dtype='float32'))
+        tf_cam_ado = rotm_and_t_to_tf(R_pr, t_pr)
+        # tf_ego_ado =  @ tf_cam_ado
+
+        ado_msg, _ = find_closest_by_time(img_tm, self.ado_pose_time_msg_buf, message_list=self.ado_pose_msg_buf)
+        ego_msg, _ = find_closest_by_time(img_tm, self.ego_pose_time_msg_buf, message_list=self.ego_pose_msg_buf)
+
+        tf_w_ado = pose_to_tf(ado_msg)
+        tf_w_ego = pose_to_tf(ego_msg)
+
+        tf_w_ado = tf_w_ego @ tf_inv(self.tf_cam_ego) @ tf_cam_ado
 
         quat_pr = rotm_to_quat(R_pr)
         state_pr = np.concatenate((t_pr.squeeze(), quat_pr))  # shape = (7,)
+
         pdb.set_trace()
         self.itr += 1
 
@@ -154,25 +209,6 @@ class ssp_rosbag:
         for i in range(max_num_gt):
             if truths[i][1] == 0:
                 return i
-
-    def find_closest_by_time_ros2(self, time_to_match, time_list, message_list=None):
-        """
-        Assumes lists are sorted earlier to later. Returns closest item in list by time. If two numbers are equally close, return the smallest number.
-        Adapted from https://stackoverflow.com/questions/12141150/from-list-of-integers-get-number-closest-to-a-given-value/12141511#12141511
-        """
-        if not message_list:
-            message_list = time_list
-        pos = bisect_left(time_list, time_to_match)
-        if pos == 0:
-            return message_list[0], 0
-        if pos == len(time_list):
-            return message_list[-1], len(message_list) - 1
-        before = time_list[pos - 1]
-        after = time_list[pos]
-        if after - time_to_match < time_to_match - before:
-            return message_list[pos], pos
-        else:
-            return message_list[pos - 1], pos - 1
 
     def run(self):
         rate = rospy.Rate(100)
