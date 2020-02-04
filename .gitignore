@@ -348,3 +348,7 @@ ASALocalRun/
 *.xml
 *.bag
 *.data
+
+.catkin_tools/*
+build/*
+devel/*
