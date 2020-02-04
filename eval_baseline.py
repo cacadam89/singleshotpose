@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+from __future__ import print_function
 import pdb
 import os, sys
+from copy import copy
 import time
 import torch
 import scipy.io
@@ -13,7 +15,9 @@ from utils import *
 from MeshPly import MeshPly
 
 from raptor_specific_utils import *
+from rosbag_dataset_utils import *
 
+import PIL.Image
 import cv2
 from cv_bridge import CvBridge, CvBridgeError
 # ros
@@ -56,7 +60,7 @@ class ssp_rosbag:
         seed = int(time.time())
         os.environ['CUDA_VISIBLE_DEVICES'] = gpus
         torch.cuda.manual_seed(seed)
-        num_classes = 1
+        self.num_classes = 1
 
         # Read object model information, get 3D bounding box corners
         if meshname is None:
@@ -78,12 +82,11 @@ class ssp_rosbag:
             except:
                 diam  = calc_pts_diameter(np.array(mesh.vertices))
             
-        self.corners3D            = get_3D_corners(vertices)
+        self.corners3D = get_3D_corners(vertices)
         # self.K = get_camera_intrinsic(u0, v0, fx, fy)
 
         # Specicy model, load pretrained weights, pass to GPU and set the module in evaluation mode
         self.model = Darknet(modelcfg)
-        self.model.print_network()
         self.model.load_weights(weightfile)
         self.model.cuda()
         self.model.eval()
@@ -94,6 +97,7 @@ class ssp_rosbag:
         ##############################################################################
         ##############################################################################
 
+        self.latest_msg = None
         self.itr = 0
         self.bridge = CvBridge()
         self.img_buffer = ([], [])
@@ -112,33 +116,37 @@ class ssp_rosbag:
         Maintains a buffer of images & times. The first element is the earliest. 
         Stored in a way to interface with a quick method for finding closest match by time.
         """
+        self.latest_msg = msg
 
-        # im_msg = self.find_closest_by_time_ros2(my_time, self.img_buffer[1], self.img_buffer[0])[0]
-        image = self.bridge.imgmsg_to_cv2(im_msg, desired_encoding="passthrough")
-        img = cv2.undistort(image, self.K, self.dist_coefs, None, self.new_camera_matrix)
-        
-        # img = Image.open(imgpath).convert('RGB')
-        img = img.resize(self.shape)
-        img = img.cuda()
+    def ssp_image(self):
+        print("new image (itr {}".format(self.itr))
+        msg = copy(self.latest_msg)
+        img = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+        img = cv2.undistort(img, self.K, self.dist_coefs, None, self.new_camera_matrix)
+        img = PIL.Image.fromarray(img).resize(self.shape)
+
+        img = transforms.ToTensor()(img).resize(1, 3, img.size[0], img.size[1]).cuda()
+
         img = Variable(img, volatile=True)
-        
-        output = self.model(data).data   # Forward pass
-        
+        output = self.model(img).data   # Forward pass
+
         # Using confidence threshold, eliminate low-confidence predictions
-        all_boxes = get_region_boxes(output, num_classes, num_keypoints)   
+        box_pr = get_region_boxes(output, self.num_classes, self.model.num_keypoints)
         
         # Denormalize the corner predictions 
         corners2D_pr = np.array(np.reshape(box_pr[:18], [-1, 2]), dtype='float32')
         corners2D_pr[:, 0] = corners2D_pr[:, 0] * self.im_width
         corners2D_pr[:, 1] = corners2D_pr[:, 1] * self.im_height
-        # preds_corners2D.append(corners2D_pr)
 
          # [OPTIONAL] generate images with bb drawn on them
         # draw_2d_proj_of_3D_bounding_box(data, corners2D_pr, corners2D_gt, None, batch_idx, k, im_save_dir = "./backup/{}/valid_output_images/".format(name))
         
         # Compute [R|t] by pnp
         R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), self.corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(self.K, dtype='float32'))
-        
+
+        quat_pr = rotm_to_quat(R_pr)
+        state_pr = np.concatenate((t_pr.squeeze(), quat_pr))  # shape = (7,)
+        pdb.set_trace()
         self.itr += 1
 
 
@@ -168,7 +176,11 @@ class ssp_rosbag:
 
     def run(self):
         rate = rospy.Rate(100)
+        b_flag = True
         while not rospy.is_shutdown():
+            if b_flag and self.latest_msg is not None:
+                b_flag = False
+                self.ssp_image()
             rate.sleep()
 
 

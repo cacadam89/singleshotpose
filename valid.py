@@ -141,6 +141,8 @@ def valid(datacfg, modelcfg, weightfile):
     for batch_idx, (data, target) in enumerate(test_loader):
         t1 = time.time()
         # Pass data to GPU
+        pdb.set_trace()
+
         data = data.cuda()
         target = target.cuda()
         # Wrap tensors in Variable class, set volatile=True for inference mode and to use minimal memory during inference

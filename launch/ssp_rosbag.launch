@@ -3,9 +3,9 @@
   <arg name="id"              default="7" />
   <arg name="robot_type"      default="quad" />
   <arg name="ns"              value="/$(arg robot_type)$(arg id)" />
-  <arg name="modelcfg"        value="../backup/mslquad/model.weights" />
-  <arg name="weightfile"      value="../cfg/yolo-pose.cfg" />
-  <arg name="datacfg"         value="../cfg/mslquad.data" />
+  <arg name="weightfile"      value="backup/mslquad/model.weights" />
+  <arg name="modelcfg"        value="cfg/yolo-pose.cfg" />
+  <arg name="datacfg"         value="cfg/mslquad.data" />
 
   <!-- Use sim time for reading from rosbag -->
   <param name="use_sim_time" value="true" />
@@ -16,8 +16,8 @@
   <!-- Launch our main node -->
   <node name="SSP_baseline_eval" pkg="singleshotpose" type="eval_baseline.py" output="screen">
     <param name="ns"  value="$(arg ns)"/> 
-    <param name="modelcfg"  value="$(arg modelcfg)"/> 
-    <param name="weightfile"  value="$(arg weightfile)"/> 
-    <param name="datacfg"  value="$(arg datacfg)"/> 
+    <param name="modelcfg"  value="$(find singleshotpose)/$(arg modelcfg)"/> 
+    <param name="weightfile"  value="$(find singleshotpose)/$(arg weightfile)"/> 
+    <param name="datacfg"  value="$(find singleshotpose)/$(arg datacfg)"/> 
   </node>
 </launch>

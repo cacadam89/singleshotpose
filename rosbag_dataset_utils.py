@@ -8,7 +8,11 @@ import numpy as np
 import numpy.linalg as la
 from bisect import bisect_left
 # ros
-import rospy, rosbag
+import rospy
+try:
+    import rosbag
+except:
+    pass
 from geometry_msgs.msg import PoseStamped, Twist, Pose
 from sensor_msgs.msg import Image, CameraInfo
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension
@@ -32,6 +36,12 @@ def quat_to_rotm(quat):
     """
     return R.from_quat(np.roll(np.reshape(quat, (-1, 4)),3,axis=1)).as_dcm()
 
+def rotm_to_quat(rotm):
+    """ 
+    calculate the rotation matrix of a given quaternion (frames assumed to be consistant 
+    with the UKF state quaternion). First element of quat is the scalar.
+    """
+    return np.roll(R.from_dcm(rotm).as_quat(),1)
 
 def quat_to_tf(quat):
     """ 
