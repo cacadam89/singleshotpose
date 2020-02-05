@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import os
+import pdb
 
 ###########################################################
 def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=None, im_save_dir=None):
@@ -54,6 +55,7 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
         if len(fn_str) > 0:
             fn_str += '_'
         fn_str += 'detect_num_{}'.format(detect_num)
+
     cv2.imwrite(im_save_dir + "/" + fn_str + ".jpg", open_cv_image)
 
     return open_cv_image

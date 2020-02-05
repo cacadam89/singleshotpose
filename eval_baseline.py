@@ -132,7 +132,7 @@ class ssp_rosbag:
         camera_info = rospy.wait_for_message(self.ns + '/camera/camera_info', CameraInfo, 30)
         self.K = np.reshape(camera_info.K, (3, 3))
         self.dist_coefs = np.reshape(camera_info.D, (5,))
-        self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(self.K, self.dist_coefs, (camera_info.width, camera_info.height), 1, (camera_info.width, camera_info.height))
+        self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(self.K, self.dist_coefs, (camera_info.width, camera_info.height), 0, (camera_info.width, camera_info.height))
         rospy.Subscriber(self.ns + '/mavros/vision_pose/pose', PoseStamped, self.ego_pose_gt_cb, queue_size=10)  # optitrack pose
         rospy.Subscriber(self.ns + '/camera/image_raw', Image, self.image_cb, queue_size=1,buff_size=2**21)
         rospy.Subscriber('/quad4' + '/mavros/vision_pose/pose', PoseStamped, self.ado_pose_gt_cb, queue_size=10)  # DEBUG ONLY - optitrack pose
@@ -196,12 +196,14 @@ class ssp_rosbag:
         tf_w_ego = pose_to_tf(ego_msg.pose)
 
         tf_w_ado = tf_w_ego @ invert_tf(self.tf_cam_ego) @ tf_cam_ado
+
+        draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=1, im_save_dir="/root/ssp_ws/src/singleshotpose")
         pdb.set_trace()
 
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
         pdb.set_trace()  # os.path.exists()  os.system("pwd")  os.listdir("/root/ssp_ws/src/singleshotpose")
-        draw_2d_proj_of_3D_bounding_box(img_cv2, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=1, im_save_dir="/root/ssp_ws/src/singleshotpose")
+        
 
         self.itr += 1
 
