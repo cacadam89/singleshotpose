@@ -36,7 +36,7 @@ def rotm_and_t_to_tf(rotm, t):
     """
     tf_out = np.eye(4)
     tf_out[0:3, 0:3] = rotm
-    tf_out[0:3, 3] = t
+    tf_out[0:3, 3] = t.squeeze()
     return tf_out
 
 
@@ -47,12 +47,14 @@ def quat_to_rotm(quat):
     """
     return R.from_quat(np.roll(np.reshape(quat, (-1, 4)),3,axis=1)).as_dcm()
 
+
 def rotm_to_quat(rotm):
     """ 
     calculate the rotation matrix of a given quaternion (frames assumed to be consistant 
     with the UKF state quaternion). First element of quat is the scalar.
     """
     return np.roll(R.from_dcm(rotm).as_quat(),1)
+
 
 def quat_to_tf(quat):
     """ 
@@ -132,5 +134,4 @@ def read_rosbag(rosbag_dir, input_rosbag, topics, tf_cam_ego):
     print("done reading rosbag")
     my_camera = camera(K, dist_coefs, im_w, im_h, tf_cam_ego)
     return ego_pose_msg_list, ego_pose_msg_time_list, ado_pose_msg_list, ado_pose_msg_time_list, image_msg_list, my_camera
-
 

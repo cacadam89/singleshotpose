@@ -165,9 +165,9 @@ class ssp_rosbag:
         print("new image (itr {}".format(self.itr))
         msg = copy(self.latest_msg)
         img_tm = msg.header.stamp.to_sec()
-        img = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
-        img = cv2.undistort(img, self.K, self.dist_coefs, None, self.new_camera_matrix)
-        img = PIL.Image.fromarray(img).resize(self.shape)
+        img_cv2 = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
+        img_cv2 = cv2.undistort(img_cv2, self.K, self.dist_coefs, None, self.new_camera_matrix)
+        img = PIL.Image.fromarray(img_cv2).resize(self.shape)
 
         img = transforms.ToTensor()(img).resize(1, 3, img.size[0], img.size[1]).cuda()
 
@@ -188,20 +188,21 @@ class ssp_rosbag:
         # Compute [R|t] by pnp
         R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), self.corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(self.K, dtype='float32'))
         tf_cam_ado = rotm_and_t_to_tf(R_pr, t_pr)
-        # tf_ego_ado =  @ tf_cam_ado
 
         ado_msg, _ = find_closest_by_time(img_tm, self.ado_pose_time_msg_buf, message_list=self.ado_pose_msg_buf)
         ego_msg, _ = find_closest_by_time(img_tm, self.ego_pose_time_msg_buf, message_list=self.ego_pose_msg_buf)
 
-        tf_w_ado = pose_to_tf(ado_msg)
-        tf_w_ego = pose_to_tf(ego_msg)
+        tf_w_ado = pose_to_tf(ado_msg.pose)
+        tf_w_ego = pose_to_tf(ego_msg.pose)
 
-        tf_w_ado = tf_w_ego @ tf_inv(self.tf_cam_ego) @ tf_cam_ado
-
-        quat_pr = rotm_to_quat(R_pr)
-        state_pr = np.concatenate((t_pr.squeeze(), quat_pr))  # shape = (7,)
-
+        tf_w_ado = tf_w_ego @ invert_tf(self.tf_cam_ego) @ tf_cam_ado
         pdb.set_trace()
+
+        quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
+        state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
+        pdb.set_trace()  # os.path.exists()  os.system("pwd")  os.listdir("/root/ssp_ws/src/singleshotpose")
+        draw_2d_proj_of_3D_bounding_box(img_cv2, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=1, im_save_dir="/root/ssp_ws/src/singleshotpose")
+
         self.itr += 1
 
 
