@@ -158,12 +158,12 @@ class ssp_rosbag:
         Maintains a buffer of images & times. The first element is the earliest. 
         Stored in a way to interface with a quick method for finding closest match by time.
         """
-        self.latest_msg = msg
+    #     self.latest_msg = msg
 
 
-    def ssp_image(self):
-        print("new image (itr {}".format(self.itr))
-        msg = copy(self.latest_msg)
+    # def ssp_image(self):
+        print("new image (itr {})".format(self.itr))
+    #     msg = copy(self.latest_msg)
         img_tm = msg.header.stamp.to_sec()
         img_cv2 = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         img_cv2 = cv2.undistort(img_cv2, self.K, self.dist_coefs, None, self.new_camera_matrix)
@@ -182,9 +182,6 @@ class ssp_rosbag:
         corners2D_pr[:, 0] = corners2D_pr[:, 0] * self.im_width
         corners2D_pr[:, 1] = corners2D_pr[:, 1] * self.im_height
 
-         # [OPTIONAL] generate images with bb drawn on them
-        # draw_2d_proj_of_3D_bounding_box(data, corners2D_pr, corners2D_gt, None, batch_idx, k, im_save_dir = "./backup/{}/valid_output_images/".format(name))
-        
         # Compute [R|t] by pnp
         R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), self.corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(self.K, dtype='float32'))
         tf_cam_ado = rotm_and_t_to_tf(R_pr, t_pr)
@@ -192,18 +189,16 @@ class ssp_rosbag:
         ado_msg, _ = find_closest_by_time(img_tm, self.ado_pose_time_msg_buf, message_list=self.ado_pose_msg_buf)
         ego_msg, _ = find_closest_by_time(img_tm, self.ego_pose_time_msg_buf, message_list=self.ego_pose_msg_buf)
 
-        tf_w_ado = pose_to_tf(ado_msg.pose)
+        tf_w_ado_gt = pose_to_tf(ado_msg.pose)
         tf_w_ego = pose_to_tf(ego_msg.pose)
 
         tf_w_ado = tf_w_ego @ invert_tf(self.tf_cam_ego) @ tf_cam_ado
 
-        draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=1, im_save_dir="/root/ssp_ws/src/singleshotpose")
-        pdb.set_trace()
+        if False:
+            draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=1, im_save_dir="/root/ssp_ws/src/singleshotpose")
 
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
-        pdb.set_trace()  # os.path.exists()  os.system("pwd")  os.listdir("/root/ssp_ws/src/singleshotpose")
-        
 
         self.itr += 1
 
