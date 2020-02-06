@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import print_function
 import pdb
-import os, sys
+import os, sys, time
 from copy import copy
 import time
 import torch
@@ -99,6 +99,7 @@ class ssp_rosbag:
 
         self.latest_msg = None  # debug - can probably delete this 
         self.itr = 0
+        self.time_prev = -1
         self.bridge = CvBridge()
         self.pose_buffer_len = 20
         self.ado_pose_msg_buf = []
@@ -158,11 +159,13 @@ class ssp_rosbag:
         Maintains a buffer of images & times. The first element is the earliest. 
         Stored in a way to interface with a quick method for finding closest match by time.
         """
+        if self.time_prev < 0:
+            self.time_prev = time.time()
     #     self.latest_msg = msg
 
 
     # def ssp_image(self):
-        print("new image (itr {})".format(self.itr))
+        print("new image (itr {})".format(self.itr), end='')
     #     msg = copy(self.latest_msg)
         img_tm = msg.header.stamp.to_sec()
         img_cv2 = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
@@ -199,7 +202,8 @@ class ssp_rosbag:
 
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
-
+        print("   .... delta time is {} s".format(time.time() - self.time_prev))
+        self.time_prev = time.time()
         self.itr += 1
 
 
