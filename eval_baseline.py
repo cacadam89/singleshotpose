@@ -161,12 +161,12 @@ class ssp_rosbag:
         """
         if self.time_prev < 0:
             self.time_prev = time.time()
-    #     self.latest_msg = msg
+        self.latest_msg = msg
 
 
-    # def ssp_image(self):
+    def ssp_image(self):
         print("new image (itr {})".format(self.itr), end='')
-    #     msg = copy(self.latest_msg)
+        msg = copy(self.latest_msg)
         img_tm = msg.header.stamp.to_sec()
         img_cv2 = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         img_cv2 = cv2.undistort(img_cv2, self.K, self.dist_coefs, None, self.new_camera_matrix)
@@ -204,6 +204,7 @@ class ssp_rosbag:
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
         print("   .... delta time is {} s".format(time.time() - self.time_prev))
         self.time_prev = time.time()
+        pdb.set_trace()
         self.itr += 1
 
 
@@ -224,6 +225,7 @@ class ssp_rosbag:
 
 if __name__ == '__main__':
     try:
+        np.set_printoptions(linewidth=160, suppress=True)  # make print statments easier to read
         program = ssp_rosbag()
         program.run()
     except:
