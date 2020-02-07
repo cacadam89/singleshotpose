@@ -97,7 +97,7 @@ class ssp_rosbag:
         ##############################################################################
         ##############################################################################
 
-        self.latest_msg = None  # debug - can probably delete this 
+        self.result_list = []  # save the results as they are processed
         self.itr = 0
         self.time_prev = -1
         self.bridge = CvBridge()
@@ -139,7 +139,6 @@ class ssp_rosbag:
         rospy.Subscriber('/quad4' + '/mavros/vision_pose/pose', PoseStamped, self.ado_pose_gt_cb, queue_size=10)  # DEBUG ONLY - optitrack pose
 
         
-
     def ado_pose_gt_cb(self, msg):
         self.ado_pose_gt_rosmsg = msg.pose
         pose_tm = msg.header.stamp.to_sec()
@@ -159,14 +158,6 @@ class ssp_rosbag:
         Maintains a buffer of images & times. The first element is the earliest. 
         Stored in a way to interface with a quick method for finding closest match by time.
         """
-        if self.time_prev < 0:
-            self.time_prev = time.time()
-        self.latest_msg = msg
-
-
-    def ssp_image(self):
-        print("new image (itr {})".format(self.itr), end='')
-        msg = copy(self.latest_msg)
         img_tm = msg.header.stamp.to_sec()
         img_cv2 = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         img_cv2 = cv2.undistort(img_cv2, self.K, self.dist_coefs, None, self.new_camera_matrix)
@@ -197,15 +188,26 @@ class ssp_rosbag:
 
         tf_w_ado = tf_w_ego @ invert_tf(self.tf_cam_ego) @ tf_cam_ado
 
-        if False:
-            draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=1, im_save_dir="/root/ssp_ws/src/singleshotpose")
-
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
-        print("   .... delta time is {} s".format(time.time() - self.time_prev))
-        self.time_prev = time.time()
-        pdb.set_trace()
+
+        self.result_list.append((state_pr, tf_w_ado, tf_w_ado_gt, img_tm, time.time()))
         self.itr += 1
+        if self.itr > 0 and self.itr % 50 == 0:
+            print("Finished processing image #{}".format(self.itr))
+
+
+    def post_process_data(self):
+        print("Post-processing data now ({} itrs)".format(len(self.result_list)))
+        b_save_bb_imgs = True
+        bb_im_path = './root/ssp_ws/src/singleshotpose/output_imgs'
+        create_dir_if_missing(bb_im_path)
+        for i, res in enumerate(self.result_list):
+            if b_save_bb_imgs:
+                draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
+            if i > 3:
+                break
+        print("done with post process!")
 
 
     def truths_length(self, truths, max_num_gt=50):
@@ -213,14 +215,13 @@ class ssp_rosbag:
             if truths[i][1] == 0:
                 return i
 
+
     def run(self):
         rate = rospy.Rate(100)
         b_flag = True
         while not rospy.is_shutdown():
-            if b_flag and self.latest_msg is not None:
-                b_flag = False
-                self.ssp_image()
             rate.sleep()
+        print("1 test do we ever get here??")
 
 
 if __name__ == '__main__':
@@ -229,5 +230,8 @@ if __name__ == '__main__':
         program = ssp_rosbag()
         program.run()
     except:
+        print("2 test do we ever get here??")
+        if len(self.result_list) > 0:
+            self.post_process_data()
         import traceback
         traceback.print_exc()
