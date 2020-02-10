@@ -171,11 +171,10 @@ class ssp_rosbag:
 
         img_cv2 = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         img_cv2 = cv2.undistort(img_cv2, self.K, self.dist_coefs, None, self.new_camera_matrix)
-        img = PIL.Image.fromarray(img_cv2).resize(self.shape)
+        img_pil = PIL.Image.fromarray(img_cv2).resize(self.shape)
 
-        img = transforms.ToTensor()(img).resize(1, 3, img.size[0], img.size[1]).cuda()
+        img =  Variable(transforms.ToTensor()(img_pil).resize(1, 3, img_pil.size[0], img_pil.size[1]).cuda(), volatile=True)
 
-        img = Variable(img, volatile=True)
         output = self.model(img).data   # Forward pass
 
         # Using confidence threshold, eliminate low-confidence predictions
@@ -201,7 +200,7 @@ class ssp_rosbag:
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
 
-        self.result_list.append((state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img_cv2, img_tm, time.time()))
+        self.result_list.append((state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, time.time()))
         self.itr += 1
         if self.itr > 0 and self.itr % 50 == 0:
             print("Finished processing image #{}".format(self.itr))
@@ -210,15 +209,16 @@ class ssp_rosbag:
     def post_process_data(self):
         print("Post-processing data now ({} itrs)".format(len(self.result_list)))
         b_save_bb_imgs = True
-        bb_im_path = './root/ssp_ws/src/singleshotpose/output_imgs'
+        # bb_im_path = '/root/ssp_ws/src/singleshotpose/output_imgs'
+        # bb_im_path = os.path.dirname(os.path.abspath(__file__)) + './output_imgs'
+        bb_im_path = os.path.dirname(os.path.relpath(__file__)) + '/output_imgs'
         create_dir_if_missing(bb_im_path)
         for i, res in enumerate(self.result_list):
-            state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img_cv2, img_tm, sys_time = res
-            # pdb.set_trace()
-            # if b_save_bb_imgs:
-            #     draw_2d_proj_of_3D_bounding_box(img_cv2, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
-            # if i > 3:
-            #     break
+            state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, sys_time = res
+            if b_save_bb_imgs:
+                draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
+            if i > 3:
+                break
         print("done with post process!")
 
 
@@ -232,15 +232,11 @@ class ssp_rosbag:
         rate = rospy.Rate(100)
         b_flag = True
         while not rospy.is_shutdown():
-            # if not self.b_first_rb_loop:
             try:
                 rate.sleep()
             except: # this will happen if the clock goes backwards (i.e. rosbag loops)
-                print("failed to sleep")
                 self.post_process_data()
                 return
-            # rate.sleep()
-        # print("1 test do we ever get here??")
 
 
 if __name__ == '__main__':
@@ -249,9 +245,6 @@ if __name__ == '__main__':
         program = ssp_rosbag()
         program.run()
     except:
-        # print("\n2 test do we ever get here??")
-        # if len(program.result_list) > 0:
-        #     program.post_process_data()
         import traceback
         traceback.print_exc()
     print("done with program!")

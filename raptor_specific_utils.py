@@ -34,6 +34,7 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
     color_pr = (0,0,255)
     linewidth = 1
     for inds in inds_to_connect:
+
         if corners2D_gt is not None:
             open_cv_image = cv2.line(open_cv_image, (corners2D_gt[inds[0],0], corners2D_gt[inds[0],1]), (corners2D_gt[inds[1],0], corners2D_gt[inds[1], 1]), color_gt, linewidth)
         open_cv_image = cv2.line(open_cv_image, (corners2D_pr[inds[0],0], corners2D_pr[inds[0],1]), (corners2D_pr[inds[1],0], corners2D_pr[inds[1], 1]), color_pr, linewidth)
@@ -41,10 +42,10 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
     if im_save_dir is None:
         im_save_dir = "./backup/mslquad/test_output_images/"
     
-    if batch_idx == 0:
+    if batch_idx is None or batch_idx == 0:
         if not os.path.exists(im_save_dir):
             os.makedirs(im_save_dir)
-    fn_str = ""
+    fn_str = "overlaid_img_"
     if epoch is not None:
         fn_str += 'epoch_{}'.format(epoch)
     if batch_idx is not None:
