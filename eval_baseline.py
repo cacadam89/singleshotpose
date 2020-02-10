@@ -200,7 +200,7 @@ class ssp_rosbag:
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
 
-        self.result_list.append((state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, time.time()))
+        self.result_list.append((state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img.cpu(), img_tm, time.time()))
         self.itr += 1
         if self.itr > 0 and self.itr % 50 == 0:
             print("Finished processing image #{}".format(self.itr))
@@ -217,8 +217,8 @@ class ssp_rosbag:
             state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, sys_time = res
             if b_save_bb_imgs:
                 draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
-            if i > 3:
-                break
+            # if i > 3:
+            #     break
         print("done with post process!")
 
 
