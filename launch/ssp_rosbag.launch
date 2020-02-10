@@ -11,10 +11,10 @@
   <param name="use_sim_time" value="true" />
 
   <!-- Play rosbag -->
-  <node pkg="rosbag" type="play" name="player" args="--clock $(find singleshotpose)/rosbags/$(arg rb_name).bag"/>
+  <node pkg="rosbag" type="play" name="ssp_player" args="--clock -l $(find singleshotpose)/rosbags/$(arg rb_name).bag"/>
 
-  <!-- Launch our main node -->
-  <node name="SSP_baseline_eval" pkg="singleshotpose" type="eval_baseline.py" output="screen">
+  <!-- Launch SSP baseline node -->
+  <node name="SSP_baseline_eval" pkg="singleshotpose" type="eval_baseline.py" required="false" output="screen">
     <param name="ns"  value="$(arg ns)"/> 
     <param name="modelcfg"  value="$(find singleshotpose)/$(arg modelcfg)"/> 
     <param name="weightfile"  value="$(find singleshotpose)/$(arg weightfile)"/> 
