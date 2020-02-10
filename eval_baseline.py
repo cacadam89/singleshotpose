@@ -54,7 +54,7 @@ class ssp_rosbag:
             box_width = float(data_options['box_width'])
             box_height = float(data_options['box_height'])
 
-        name         = data_options['name']
+        self.name         = data_options['name']
         gpus         = data_options['gpus'] 
         self.im_width     = int(data_options['width'])
         self.im_height    = int(data_options['height'])
@@ -76,15 +76,15 @@ class ssp_rosbag:
                                 [-box_length/2,-box_width/2,-box_height/2, 1.],
                                 [-box_length/2, box_width/2,-box_height/2, 1.],
                                 [-box_length/2, box_width/2, box_height/2, 1.]]).T
-            diam  = float(data_options['diam'])
+            self.diam  = float(data_options['diam'])
         else:
             mesh             = MeshPly(meshname)
             vertices         = np.c_[np.array(mesh.vertices), np.ones((len(mesh.vertices), 1))].transpose()
             try:
-                diam  = float(data_options['diam'])
+                self.diam  = float(data_options['diam'])
             except:
-                diam  = calc_pts_diameter(np.array(mesh.vertices))
-            
+                self.diam  = calc_pts_diameter(np.array(mesh.vertices))
+        self.vertices = vertices    
         self.corners3D = get_3D_corners(vertices)
         # self.K = get_camera_intrinsic(u0, v0, fx, fy)
 
@@ -195,12 +195,14 @@ class ssp_rosbag:
         tf_w_ado_gt = pose_to_tf(ado_msg.pose)
         tf_w_ego = pose_to_tf(ego_msg.pose)
 
-        tf_w_ado = tf_w_ego @ invert_tf(self.tf_cam_ego) @ tf_cam_ado
+        tf_w_cam = tf_w_ego @ invert_tf(self.tf_cam_ego)
+
+        tf_w_ado = tf_w_cam @ tf_cam_ado
 
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
 
-        self.result_list.append((state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, time.time()))
+        self.result_list.append((state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, time.time(), R_pr, t_pr, invert_tf(tf_w_cam), tf_w_ego) )
         self.itr += 1
         if self.itr > 0 and self.itr % 50 == 0:
             print("Finished processing image #{}".format(self.itr))
@@ -209,16 +211,90 @@ class ssp_rosbag:
     def post_process_data(self):
         print("Post-processing data now ({} itrs)".format(len(self.result_list)))
         b_save_bb_imgs = True
-        # bb_im_path = '/root/ssp_ws/src/singleshotpose/output_imgs'
-        # bb_im_path = os.path.dirname(os.path.abspath(__file__)) + './output_imgs'
-        bb_im_path = os.path.dirname(os.path.relpath(__file__)) + '/output_imgs'
+        bb_im_path = os.path.dirname(os.path.relpath(__file__)) + '/output_imgs' # PATH MUST BE RELATIVE
         create_dir_if_missing(bb_im_path)
+        N = len(self.result_list)
+
+        # To save
+        trans_dist = 0.0
+        angle_dist = 0.0
+        pixel_dist = 0.0
+        testing_samples = 0.0
+        testing_error_trans = 0.0
+        testing_error_angle = 0.0
+        testing_error_pixel = 0.0
+        errs_2d             = []
+        errs_3d             = []
+        errs_trans          = []
+        errs_angle          = []
+        errs_corner2D       = []
+        preds_trans         = []
+        preds_rot           = []
+        preds_corners2D     = []
+        gts_trans           = []
+        gts_rot             = []
+        gts_corners2D       = []
         for i, res in enumerate(self.result_list):
-            state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, sys_time = res
+
+            # extract /  compute values for comparison
+            state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, sys_time, R_pr, t_pr, tf_cam_w, tf_w_ego = res
+            tf_cam_ado_gt = tf_cam_w @ tf_w_ado_gt
+            R_gt = tf_cam_ado_gt[0:3, 0:3]
+            t_gt = tf_cam_ado_gt[0:3, 3].reshape(t_pr.shape)
+
+            # Compute translation error
+            trans_dist = np.sqrt(np.sum(np.square(t_gt - t_pr)))
+            errs_trans.append(trans_dist)
+            
+            # Compute angle error
+            angle_dist = calcAngularDistance(R_gt, R_pr)
+            errs_angle.append(angle_dist)
+            
+            # Compute pixel error
+            Rt_gt        = np.concatenate((R_gt, t_gt), axis=1)
+            Rt_pr        = np.concatenate((R_pr, t_pr), axis=1)
+            proj_2d_gt   = compute_projection(self.vertices, Rt_gt, self.K)
+            proj_2d_pred = compute_projection(self.vertices, Rt_pr, self.K) 
+            norm         = np.linalg.norm(proj_2d_gt - proj_2d_pred, axis=0)
+            pixel_dist   = np.mean(norm)
+            errs_2d.append(pixel_dist)
+
+            # Compute 3D distances
+            transform_3d_gt   = compute_transformation(self.vertices, Rt_gt) 
+            transform_3d_pred = compute_transformation(self.vertices, Rt_pr)  
+            norm3d            = np.linalg.norm(transform_3d_gt - transform_3d_pred, axis=0)
+            vertex_dist       = np.mean(norm3d)
+            errs_3d.append(vertex_dist)
+
+
+            # Sum errors
+            testing_error_trans  += trans_dist
+            testing_error_angle  += angle_dist
+            testing_error_pixel  += pixel_dist
+            testing_samples      += 1
             if b_save_bb_imgs:
                 draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
-            if i > 3:
-                break
+
+        # Compute 2D projection error, 6D pose error, 5cm5degree error
+        px_threshold = 5 # 5 pixel threshold for 2D reprojection error is standard in recent sota 6D object pose estimation works 
+        eps          = 1e-5
+        acc          = len(np.where(np.array(errs_2d) <= px_threshold)[0]) * 100. / (len(errs_2d)+eps)
+        acc5cm5deg   = len(np.where((np.array(errs_trans) <= 0.05) & (np.array(errs_angle) <= 5))[0]) * 100. / (len(errs_trans)+eps)
+        acc3d10      = len(np.where(np.array(errs_3d) <= self.diam * 0.1)[0]) * 100. / (len(errs_3d)+eps)
+        acc5cm5deg   = len(np.where((np.array(errs_trans) <= 0.05) & (np.array(errs_angle) <= 5))[0]) * 100. / (len(errs_trans)+eps)
+        corner_acc   = len(np.where(np.array(errs_corner2D) <= px_threshold)[0]) * 100. / (len(errs_corner2D)+eps)
+        mean_err_2d  = np.mean(errs_2d)
+        mean_corner_err_2d = np.mean(errs_corner2D)
+        nts = float(testing_samples)
+
+        # Print test statistics
+        logging('\nResults of {}'.format(self.name))
+        logging('   Acc using {} px 2D Projection = {:.2f}%'.format(px_threshold, acc))
+        logging('   Acc using 10% threshold - {} vx 3D Transformation = {:.2f}%'.format(self.diam * 0.1, acc3d10))
+        logging('   Acc using 5 cm 5 degree metric = {:.2f}%'.format(acc5cm5deg))
+        logging("   Mean 2D pixel error is %f, Mean vertex error is %f, mean corner error is %f" % (mean_err_2d, np.mean(errs_3d), mean_corner_err_2d))
+        logging('   Translation error: %f m, angle error: %f degree, pixel error: % f pix' % (testing_error_trans/nts, testing_error_angle/nts, testing_error_pixel/nts) )
+
         print("done with post process!")
 
 
