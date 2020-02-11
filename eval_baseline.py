@@ -86,16 +86,16 @@ class ssp_rosbag:
                 self.diam  = calc_pts_diameter(np.array(mesh.vertices))
         self.vertices = vertices    
         self.corners3D = get_3D_corners(vertices)
-        # self.K = get_camera_intrinsic(u0, v0, fx, fy)
 
-        # Specicy model, load pretrained weights, pass to GPU and set the module in evaluation mode
+        # Specify model, load pretrained weights, pass to GPU and set the module in evaluation mode
+        torch.set_grad_enabled(False)  # since we are just doing forward passes
         self.model = Darknet(modelcfg)
         self.model.load_weights(weightfile)
         self.model.cuda()
         self.model.eval()
         self.shape = (self.model.test_width, self.model.test_height)
         num_keypoints = self.model.num_keypoints 
-        num_labels    = num_keypoints * 2 + 3 # +2 for width, height,  +1 for class label
+        num_labels = num_keypoints * 2 + 3 # +2 for width, height,  +1 for class label
         ##############################################################################
         ##############################################################################
         ##############################################################################
@@ -131,6 +131,7 @@ class ssp_rosbag:
         R_delta = np.dot(R_deltax, np.dot(R_deltay, R_deltaz))
         self.tf_cam_ego[0:3,0:3] = np.matmul(R_delta, self.tf_cam_ego[0:3,0:3])
         #########################################################################################
+
 
 
         camera_info = rospy.wait_for_message(self.ns + '/camera/camera_info', CameraInfo, 30)
@@ -175,7 +176,8 @@ class ssp_rosbag:
 
         img =  Variable(transforms.ToTensor()(img_pil).resize(1, 3, img_pil.size[0], img_pil.size[1]).cuda(), volatile=True)
 
-        output = self.model(img).data   # Forward pass
+        with torch.no_grad():
+            output = self.model(img).data   # Forward pass
 
         # Using confidence threshold, eliminate low-confidence predictions
         box_pr = get_region_boxes(output, self.num_classes, self.model.num_keypoints)
@@ -202,11 +204,31 @@ class ssp_rosbag:
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
 
-        self.result_list.append((state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, time.time(), R_pr, t_pr, invert_tf(tf_w_cam), tf_w_ego) )
-        
+        img_to_save = copy(np.array(img))
+        ############################
+        ############################
+        # bb_im_path = os.path.dirname(os.path.relpath(__file__)) + '/output_imgs' # PATH MUST BE RELATIVE
+        # create_dir_if_missing(bb_im_path)
+        # tf_cam_ado_gt = invert_tf(tf_w_cam) @ tf_w_ado_gt
+        # R_gt = tf_cam_ado_gt[0:3, 0:3]
+        # t_gt = tf_cam_ado_gt[0:3, 3].reshape(t_pr.shape)
+        # Rt_gt = np.concatenate((R_gt, t_gt), axis=1)
+        # corners2D_gt = compute_projection(np.hstack((np.reshape([0,0,0,1], (4,1)), self.vertices)), Rt_gt, self.new_camera_matrix).T
+        # draw_2d_proj_of_3D_bounding_box(img_to_save, corners2D_pr, corners2D_gt=corners2D_gt, epoch=None, batch_idx=None, detect_num=self.itr, im_save_dir=bb_im_path)
+
+        print("itr {}\n{}\n{}\n{}\n{}\n".format(self.itr, self.tf_cam_ego, invert_tf(self.tf_cam_ego), tf_w_ego, tf_w_cam))
+        self.tf_cam_ego
+
+        # pdb.set_trace()
+        ############################
+        ############################
+
+        self.result_list.append((state_pr, copy(tf_w_ado), copy(tf_w_ado_gt), copy(corners2D_pr), img_to_save, img_tm, time.time(), copy(R_pr), copy(t_pr), invert_tf(tf_w_cam), copy(tf_w_ego)) )
+        del img
         self.itr += 1
         if self.itr > 0 and self.itr % 50 == 0:
             print("Finished processing image #{}".format(self.itr))
+            torch.cuda.empty_cache()
 
 
     def post_process_data(self):
@@ -235,6 +257,7 @@ class ssp_rosbag:
         gts_trans           = []
         gts_rot             = []
         gts_corners2D       = []
+        corners2D_gt = None
         for i, res in enumerate(self.result_list):
 
             # extract /  compute values for comparison
@@ -254,11 +277,17 @@ class ssp_rosbag:
             # Compute pixel error
             Rt_gt        = np.concatenate((R_gt, t_gt), axis=1)
             Rt_pr        = np.concatenate((R_pr, t_pr), axis=1)
-            proj_2d_gt   = compute_projection(self.vertices, Rt_gt, self.K)
-            proj_2d_pred = compute_projection(self.vertices, Rt_pr, self.K) 
+            proj_2d_gt   = compute_projection(self.vertices, Rt_gt, self.new_camera_matrix)
+            proj_2d_pred = compute_projection(self.vertices, Rt_pr, self.new_camera_matrix) 
             norm         = np.linalg.norm(proj_2d_gt - proj_2d_pred, axis=0)
             pixel_dist   = np.mean(norm)
             errs_2d.append(pixel_dist)
+
+            # Compute corner prediction error
+            corners2D_gt = compute_projection(np.hstack((np.reshape([0,0,0,1], (4,1)), self.vertices)), Rt_gt, self.new_camera_matrix).T
+            corner_norm = np.linalg.norm(corners2D_gt - corners2D_pr, axis=1)
+            corner_dist = np.mean(corner_norm)
+            errs_corner2D.append(corner_dist)
 
             # Compute 3D distances
             transform_3d_gt   = compute_transformation(self.vertices, Rt_gt) 
@@ -267,14 +296,13 @@ class ssp_rosbag:
             vertex_dist       = np.mean(norm3d)
             errs_3d.append(vertex_dist)
 
-
             # Sum errors
             testing_error_trans  += trans_dist
             testing_error_angle  += angle_dist
             testing_error_pixel  += pixel_dist
             testing_samples      += 1
             if b_save_bb_imgs:
-                draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
+                draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=corners2D_gt, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
 
         # Compute 2D projection error, 6D pose error, 5cm5degree error
         px_threshold = 5 # 5 pixel threshold for 2D reprojection error is standard in recent sota 6D object pose estimation works 
@@ -295,6 +323,7 @@ class ssp_rosbag:
         logging('   Acc using 5 cm 5 degree metric = {:.2f}%'.format(acc5cm5deg))
         logging("   Mean 2D pixel error is %f, Mean vertex error is %f, mean corner error is %f" % (mean_err_2d, np.mean(errs_3d), mean_corner_err_2d))
         logging('   Translation error: %f m, angle error: %f degree, pixel error: % f pix' % (testing_error_trans/nts, testing_error_angle/nts, testing_error_pixel/nts) )
+        pdb.set_trace()
 
         print("done with post process!")
         
