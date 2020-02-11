@@ -30,8 +30,8 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
                        [5,6], [6, 8], [8, 7], [7, 5], # back face edges
                        [1,5], [2, 6], [4, 8], [3, 7]] # side edges
     
-    color_gt = (255,0,0)
-    color_pr = (0,0,255)
+    color_gt = (255,0,0)  # blue
+    color_pr = (0,0,255)  # red
     linewidth = 1
     for inds in inds_to_connect:
 
