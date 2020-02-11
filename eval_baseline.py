@@ -204,7 +204,7 @@ class ssp_rosbag:
         quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
 
-        img_to_save = copy(np.array(img))
+        img_to_save = copy(np.array(img.cpu()))
         ############################
         ############################
         # bb_im_path = os.path.dirname(os.path.relpath(__file__)) + '/output_imgs' # PATH MUST BE RELATIVE
@@ -216,7 +216,7 @@ class ssp_rosbag:
         # corners2D_gt = compute_projection(np.hstack((np.reshape([0,0,0,1], (4,1)), self.vertices)), Rt_gt, self.new_camera_matrix).T
         # draw_2d_proj_of_3D_bounding_box(img_to_save, corners2D_pr, corners2D_gt=corners2D_gt, epoch=None, batch_idx=None, detect_num=self.itr, im_save_dir=bb_im_path)
 
-        print("itr {}\n{}\n{}\n{}\n{}\n".format(self.itr, self.tf_cam_ego, invert_tf(self.tf_cam_ego), tf_w_ego, tf_w_cam))
+        # print("itr {}\n{}\n{}\n{}\n{}\n".format(self.itr, self.tf_cam_ego, invert_tf(self.tf_cam_ego), tf_w_ego, tf_w_cam))
         self.tf_cam_ego
 
         # pdb.set_trace()
