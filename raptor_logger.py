@@ -17,7 +17,7 @@ from cv_bridge import CvBridge, CvBridgeError
 from utils import *
 
 class raptor_logger:
-    def __init__(self, source='MSLRAPTOR', mode="write", est_fn=None, gt_fn=None, param_fn=None):
+    def __init__(self, source='MSLRAPTOR', mode="write", est_fn=None, gt_fn=None, param_fn=None, ssp_fn=None):
         self.source = source  # MSLRAPTOR, SSP, GT
 
         self.save_elms = {}
@@ -72,6 +72,12 @@ class raptor_logger:
                 save_el_shape = (len(self.save_elms['prms']), len(self.save_elms['prms'][0]))
                 data_header = ", ".join(np.reshape([*zip(self.save_elms['prms'])], save_el_shape)[:,0].tolist())
                 np.savetxt(self.fh['prms'], X=[], header=data_header)  # write header
+            if ssp_fn is not None:
+                self.create_file_dir(ssp_fn)
+                self.fh['ssp'] = open(ssp_fn,'w+')  # doing this here makes it appendable
+                save_el_shape = (len(self.save_elms['ssp']), len(self.save_elms['ssp'][0]))
+                data_header = ", ".join(np.reshape([*zip(self.save_elms['ssp'])], save_el_shape)[:,0].tolist())
+                np.savetxt(self.fh['ssp'], X=[], header=data_header)  # write header
         elif mode == "read":
             self.fn = {}
             if est_fn is not None:
@@ -80,6 +86,8 @@ class raptor_logger:
                 self.fn['gt'] = gt_fn
             if param_fn is not None:
                 self.fn['prms'] = param_fn
+            if ssp_fn is not None:
+                self.fn['ssp'] = ssp_fn
         else:
             raise RuntimeError("Unrecognized logging mode")
 

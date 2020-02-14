@@ -47,7 +47,7 @@ RUN echo 'alias test_train_go="cd /root/ssp_ws/src/singleshotpose/ && python3 tr
     echo 'alias test_multi_go="cd /root/ssp_ws/src/singleshotpose/multi_obj_pose_estimation/ && python3 valid_multi.py --modelcfg cfg/yolo-pose-multi.cfg --initweightfile backup_multi/model_backup.weights"' >> ~/.bashrc && \
     echo 'alias train_go="cd /root/ssp_ws/src/singleshotpose/ && python3 -m pdb train.py --datacfg cfg/mslquad.data --modelcfg cfg/yolo-pose.cfg --initweightfile cfg/darknet19_448.conv.23 --pretrain_num_epochs 15"' >> ~/.bashrc && \
     echo 'alias validate_go="cd /root/ssp_ws/src/singleshotpose/ && python3 valid.py --datacfg cfg/mslquad.data --modelcfg cfg/yolo-pose.cfg --weightfile backup/mslquad/model.weights"' >> ~/.bashrc && \
-    echo 'alias ssp_go="cd /root/ssp_ws/src/singleshotpose/ && roslaunch singleshotpose ssp_rosbag.launch"' >> ~/.bashrc 
+    echo 'alias ssp_go="cd /root/ssp_ws/src/singleshotpose/ && roslaunch singleshotpose ssp_rosbag.launch"' >> ~/.bashrc
     
 
 # RUN source /ros_python3_entrypoint.sh && \

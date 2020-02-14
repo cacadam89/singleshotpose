@@ -146,11 +146,10 @@ class ssp_rosbag:
         self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(self.K, self.dist_coefs, (camera_info.width, camera_info.height), 0, (camera_info.width, camera_info.height))
 
 
-        self.log_dir = '/root/ssp_ws/src/singleshotpose/logs'
-        est_log_name = self.log_dir + "/log_" + rb_name[:-4].split("_")[-1] + "_EST.log"
-        gt_log_name = self.log_dir + "/log_" + rb_name[:-4].split("_")[-1] + "_GT.log"
-        param_log_name = self.log_dir + "/log_" + rb_name[:-4].split("_")[-1] + "_PARAM.log"
-        self.logger = raptor_logger(source="SSP", mode="write", est_fn=est_log_name, gt_fn=gt_log_name, param_fn=param_log_name)
+        self.log_out_dir = '/mounted_folder/ssp_logs'
+        ssp_log_name    = self.log_out_dir + "/log_" + rb_name[:-4].split("_")[-1] + "_SSP.log"
+        param_log_name = self.log_out_dir + "/log_" + rb_name[:-4].split("_")[-1] + "_PARAM.log"
+        self.logger = raptor_logger(source="SSP", mode="write", ssp_fn=ssp_log_name, param_fn=param_log_name)
 
         # Write params to log file ########################################################################################################
         log_data = {}
@@ -312,8 +311,7 @@ class ssp_rosbag:
             log_data['corners_3d_gt'] = np.reshape(corners3D_gt, (corners3D_gt.size,))
             log_data['proj_corners_est'] = np.reshape(self.raptor_metrics.proj_2d_pr.T, (self.raptor_metrics.proj_2d_pr.size,))
             log_data['proj_corners_gt'] = np.reshape(self.raptor_metrics.proj_2d_gt.T, (self.raptor_metrics.proj_2d_gt.size,))
-            self.logger.write_data_to_log(log_data, mode='est')
-            self.logger.write_data_to_log(log_data, mode='gt')
+            self.logger.write_data_to_log(log_data, mode='ssp')
             ######################################################
         if self.raptor_metrics is not None:
             self.raptor_metrics.calc_final_metrics()
