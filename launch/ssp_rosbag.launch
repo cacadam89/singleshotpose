@@ -19,5 +19,6 @@
     <param name="modelcfg"  value="$(find singleshotpose)/$(arg modelcfg)"/> 
     <param name="weightfile"  value="$(find singleshotpose)/$(arg weightfile)"/> 
     <param name="datacfg"  value="$(find singleshotpose)/$(arg datacfg)"/> 
+    <param name="rb_name"  value="$(arg rb_name)"/>
   </node>
 </launch>

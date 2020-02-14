@@ -352,3 +352,6 @@ ASALocalRun/
 .catkin_tools/*
 build/*
 devel/*
+
+*.zip
+*.log
