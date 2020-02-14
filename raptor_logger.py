@@ -7,13 +7,7 @@ import pdb
 # math
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-# plots
-import matplotlib
-# matplotlib.use('Agg')  ## This is needed for the gui to work from a virtual container
-import matplotlib.pyplot as plt
 # ros
-import cv2
-from cv_bridge import CvBridge, CvBridgeError
 from utils import *
 
 class raptor_logger:
