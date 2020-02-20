@@ -2,6 +2,7 @@
 # IMPORTS
 # system
 import os
+from copy import copy
 import pdb
 # math
 import numpy as np
@@ -67,9 +68,10 @@ def quat_to_tf(quat):
 
 
 def invert_tf(tf):
-    tf[0:3, 0:3] = tf[0:3, 0:3].T
-    tf[0:3, 3] = np.matmul(-tf[0:3, 0:3], tf[0:3, 3])
-    return tf
+    tf_out = copy(tf)
+    tf_out[0:3, 0:3] = tf_out[0:3, 0:3].T
+    tf_out[0:3, 3] = np.matmul(-tf_out[0:3, 0:3], tf_out[0:3, 3])
+    return tf_out
 
 
 def find_closest_by_time(time_to_match, time_list, message_list=None):

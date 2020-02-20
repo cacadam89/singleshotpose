@@ -123,7 +123,6 @@ class ssp_rosbag:
         self.tf_cam_ego[0:3, 3] = np.asarray([0.01504337, -0.06380886, -0.13854437])
         self.tf_cam_ego[0:3, 0:3] = np.reshape([-6.82621737e-04, -9.99890488e-01, -1.47832690e-02, 3.50423970e-02,  1.47502748e-02, -9.99276969e-01, 9.99385593e-01, -1.20016936e-03,  3.50284906e-02], (3, 3))
         
-        print("OOG self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
         # Correct Rotation w/ Manual Calibration
         Angle_x = 8./180. 
         Angle_y = 8./180.
@@ -139,9 +138,6 @@ class ssp_rosbag:
                              [ 0.             , 0.             , 1.              ]])
         R_delta = np.dot(R_deltax, np.dot(R_deltay, R_deltaz))
         self.tf_cam_ego[0:3,0:3] = np.matmul(R_delta, self.tf_cam_ego[0:3,0:3])
-
-
-        print("OG self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
         #########################################################################################
 
 
@@ -259,8 +255,8 @@ class ssp_rosbag:
         state_pr = np.concatenate((tf_w_ado_est[0:3, 3], quat_pr))  # shape = (7,)
 
         img_to_save = copy(np.array(img.cpu()))
-        print("..................")
-        print("self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
+        # print("..................")
+        # print("self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
         # print("tf_cam_ado_est:\n{}".format(tf_cam_ado_est))
         # print("tf_cam_ado_gt = invert_tf(tf_w_cam_gt) @ tf_w_ado_gt:\n{}".format(invert_tf(tf_w_cam_gt) @ tf_w_ado_gt))
 
@@ -310,12 +306,12 @@ class ssp_rosbag:
             R_cam_ado_gt = tf_cam_ado_gt[0:3, 0:3]
             t_cam_ado_gt = tf_cam_ado_gt[0:3, 3].reshape(t_cam_ado_pr.shape)
 
-            print("\n---------------- ITR {}, t = {:.4f} ----------------".format(i, img_tm - self.t0))
-            print("tf_w_ado_est:\n{}".format(tf_w_ado_est))
-            print("tf_w_ado_gt:\n{}".format(tf_w_ado_gt))
-            print("tf_cam_w_gt:\n{}".format(tf_cam_w_gt))
-            print("tf_cam_ado_gt:\n{}".format(tf_cam_ado_gt))
-            print("tf_w_ego_gt:\n{}".format(tf_w_ego_gt))
+            # print("\n---------------- ITR {}, t = {:.4f} ----------------".format(i, img_tm - self.t0))
+            # print("tf_w_ado_est:\n{}".format(tf_w_ado_est))
+            # print("tf_w_ado_gt:\n{}".format(tf_w_ado_gt))
+            # print("tf_cam_w_gt:\n{}".format(tf_cam_w_gt))
+            # print("tf_cam_ado_gt:\n{}".format(tf_cam_ado_gt))
+            # print("tf_w_ego_gt:\n{}".format(tf_w_ego_gt))
 
             Rt_cam_ado_gt = np.concatenate((R_cam_ado_gt, t_cam_ado_gt), axis=1)
             Rt_cam_ado_pr = np.concatenate((R_cam_ado_pr, t_cam_ado_pr), axis=1)
@@ -341,7 +337,6 @@ class ssp_rosbag:
             log_data['corners_3d_gt'] = np.reshape(corners3D_gt, (corners3D_gt.size,))
             log_data['proj_corners_est'] = np.reshape(self.raptor_metrics.proj_2d_pr[name].T, (self.raptor_metrics.proj_2d_pr[name].size,))
             log_data['proj_corners_gt'] = np.reshape(self.raptor_metrics.proj_2d_gt[name].T, (self.raptor_metrics.proj_2d_gt[name].size,))
-            pdb.set_trace()
             self.logger.write_data_to_log(log_data, name, mode='ssp')
             ######################################################
         if self.raptor_metrics is not None:
