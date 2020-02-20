@@ -2,6 +2,7 @@
   <arg name="rb_name"         default="rosbag_for_post_process_2019-12-18-02-10-28" /> <!-- name of the rosbag -->
   <arg name="id"              default="7" />
   <arg name="robot_type"      default="quad" />
+  <arg name="tracked_name"    default="quad4" />
   <arg name="ns"              value="/$(arg robot_type)$(arg id)" />
   <arg name="weightfile"      value="backup/mslquad/model.weights" />
   <arg name="modelcfg"        value="cfg/yolo-pose.cfg" />
@@ -17,10 +18,11 @@
 
   <!-- Launch SSP baseline node -->
   <node name="SSP_baseline_eval" pkg="singleshotpose" type="eval_baseline.py" required="false" output="screen">
-    <param name="ns"  value="$(arg ns)"/> 
-    <param name="modelcfg"  value="$(find singleshotpose)/$(arg modelcfg)"/> 
-    <param name="weightfile"  value="$(find singleshotpose)/$(arg weightfile)"/> 
-    <param name="datacfg"  value="$(find singleshotpose)/$(arg datacfg)"/> 
-    <param name="rb_name"  value="$(arg rb_name)"/>
+    <param name="ns"            value="$(arg ns)"/> 
+    <param name="modelcfg"      value="$(find singleshotpose)/$(arg modelcfg)"/> 
+    <param name="weightfile"    value="$(find singleshotpose)/$(arg weightfile)"/> 
+    <param name="datacfg"       value="$(find singleshotpose)/$(arg datacfg)"/> 
+    <param name="rb_name"       value="$(arg rb_name)"/>
+    <param name="tracked_name"  value="$(arg tracked_name)"/>
   </node>
 </launch>
