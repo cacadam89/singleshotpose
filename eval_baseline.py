@@ -258,14 +258,14 @@ class ssp_rosbag:
         quat_pr = rotm_to_quat(tf_w_ado_est[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado_est[0:3, 3], quat_pr))  # shape = (7,)
 
-        img_to_save = copy(np.array(img))
-
+        img_to_save = copy(np.array(img.cpu()))
         print("..................")
         print("self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
         # print("tf_cam_ado_est:\n{}".format(tf_cam_ado_est))
         # print("tf_cam_ado_gt = invert_tf(tf_w_cam_gt) @ tf_w_ado_gt:\n{}".format(invert_tf(tf_w_cam_gt) @ tf_w_ado_gt))
 
         self.result_list.append((state_pr, copy(tf_w_ado_est), copy(tf_w_ado_gt), copy(corners2D_pr), img_to_save, img_tm, time.time(), copy(R_pr), copy(t_pr), invert_tf(tf_w_cam_gt), copy(tf_w_ego_gt), copy(tf_w_ego_est)) )
+
         del img
         self.itr += 1
         if self.itr > 0 and self.itr % 50 == 0:
@@ -350,7 +350,7 @@ class ssp_rosbag:
 
         self.logger.close_files()
         print("done with post process!")
-
+        
 
     def truths_length(self, truths, max_num_gt=50):
         for i in range(max_num_gt):
