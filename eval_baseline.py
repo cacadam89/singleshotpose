@@ -23,8 +23,12 @@ from cv_bridge import CvBridge, CvBridgeError
 # ros
 import rospy
 from geometry_msgs.msg import PoseStamped, Twist, Pose
-from sensor_msgs.msg import Image, CameraInfo
+from sensor_msgs.msg import Image as ROS_IMAGE
+from sensor_msgs.msg import CameraInfo
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension
+
+from raptor_logger import *
+from pose_metrics import *
 
 class ssp_rosbag:
     def __init__(self):
@@ -40,6 +44,8 @@ class ssp_rosbag:
         modelcfg = rospy.get_param('~modelcfg')
         weightfile = rospy.get_param('~weightfile')
         datacfg = rospy.get_param('~datacfg')
+        rb_name = rospy.get_param('~rb_name')
+        self.ado_names = [rospy.get_param('~tracked_name')]
 
         # Parse configuration files
         data_options = read_data_cfg(datacfg)
@@ -54,8 +60,8 @@ class ssp_rosbag:
             box_width = float(data_options['box_width'])
             box_height = float(data_options['box_height'])
 
-        self.name         = data_options['name']
-        gpus         = data_options['gpus'] 
+        self.ego_name     = data_options['name']
+        gpus              = data_options['gpus'] 
         self.im_width     = int(data_options['width'])
         self.im_height    = int(data_options['height'])
 
@@ -107,6 +113,8 @@ class ssp_rosbag:
         self.pose_buffer_len = 20
         self.ado_pose_msg_buf = []
         self.ego_pose_msg_buf = []
+        self.ego_pose_est_msg_buf = []
+        self.ego_pose_est_time_msg_buf = []
         self.ado_pose_time_msg_buf = []
         self.ego_pose_time_msg_buf = []
 
@@ -115,6 +123,7 @@ class ssp_rosbag:
         self.tf_cam_ego[0:3, 3] = np.asarray([0.01504337, -0.06380886, -0.13854437])
         self.tf_cam_ego[0:3, 0:3] = np.reshape([-6.82621737e-04, -9.99890488e-01, -1.47832690e-02, 3.50423970e-02,  1.47502748e-02, -9.99276969e-01, 9.99385593e-01, -1.20016936e-03,  3.50284906e-02], (3, 3))
         
+        print("OOG self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
         # Correct Rotation w/ Manual Calibration
         Angle_x = 8./180. 
         Angle_y = 8./180.
@@ -130,22 +139,50 @@ class ssp_rosbag:
                              [ 0.             , 0.             , 1.              ]])
         R_delta = np.dot(R_deltax, np.dot(R_deltay, R_deltaz))
         self.tf_cam_ego[0:3,0:3] = np.matmul(R_delta, self.tf_cam_ego[0:3,0:3])
-        #########################################################################################
 
+
+        print("OG self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
+        #########################################################################################
 
 
         camera_info = rospy.wait_for_message(self.ns + '/camera/camera_info', CameraInfo, 30)
         self.K = np.reshape(camera_info.K, (3, 3))
         self.dist_coefs = np.reshape(camera_info.D, (5,))
         self.new_camera_matrix, _ = cv2.getOptimalNewCameraMatrix(self.K, self.dist_coefs, (camera_info.width, camera_info.height), 0, (camera_info.width, camera_info.height))
+
+
+        self.log_out_dir = '/mounted_folder/ssp_logs'
+        # ssp_log_name    = self.log_out_dir + "/log_" + rb_name.split("_")[-1] + "_SSP.log"
+        # param_log_name = self.log_out_dir + "/log_" + rb_name.split("_")[-1] + "_PARAM.log"
+        # self.logger = raptor_logger(source="SSP", mode="write", ssp_fn=ssp_log_name, param_fn=param_log_name)
+        base_path = self.log_out_dir + "/log_" + rb_name.split("_")[-1]
+        self.bb_3d_dict_all = {self.ado_names[0] : [box_length, box_width, box_height, self.diam]}
+        self.logger = RaptorLogger(mode="write", names=self.ado_names, base_path=base_path, b_ssp=True)
+
+        # Write params to log file ########################################################################################################
+        param_data = {}
+        if self.new_camera_matrix is not None:
+            param_data['K'] = np.array([self.new_camera_matrix[0, 0], self.new_camera_matrix[1, 1], self.new_camera_matrix[0, 2], self.new_camera_matrix[1, 2]])
+        else:
+            param_data['K'] = np.array([self.K[0, 0], self.K[1, 1], self.K[0, 2], self.K[1, 2]])
+        param_data['3d_bb_dims'] = np.array([box_length, box_width, box_height, self.diam])
+        param_data['tf_cam_ego'] = np.reshape(copy(self.tf_cam_ego), (16,))
+        # self.logger.write_data_to_log(log_data, mode='prms')
+        self.logger.write_params(param_data)
+        ###################################################################################################################################
+        self.t0 = None
+        # self.raptor_metrics = pose_metric_tracker(px_thresh=5, prct_thresh=10, trans_thresh=0.05, ang_thresh=5, name=self.name, diam=self.diam)
+        self.raptor_metrics = PoseMetricTracker(px_thresh=5, prct_thresh=10, trans_thresh=0.05, ang_thresh=5, names=self.ado_names, bb_3d_dict=self.bb_3d_dict_all)
+        
         rospy.Subscriber(self.ns + '/mavros/vision_pose/pose', PoseStamped, self.ego_pose_gt_cb, queue_size=10)  # optitrack pose
-        rospy.Subscriber(self.ns + '/camera/image_raw', Image, self.image_cb, queue_size=1,buff_size=2**21)
-        rospy.Subscriber('/quad4' + '/mavros/vision_pose/pose', PoseStamped, self.ado_pose_gt_cb, queue_size=10)  # DEBUG ONLY - optitrack pose
+        rospy.Subscriber(self.ns + '/mavros/local_position/pose', PoseStamped, self.ego_pose_est_cb, queue_size=10)  # onboard ekf pose est
+        rospy.Subscriber('/quad4' + '/mavros/vision_pose/pose', PoseStamped, self.ado_pose_gt_cb, queue_size=10)  # optitrack pose
+        rospy.Subscriber(self.ns + '/camera/image_raw', ROS_IMAGE, self.image_cb, queue_size=1,buff_size=2**21)
 
         
     def ado_pose_gt_cb(self, msg):
-        if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
-            return
+        # if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
+        #     return
         self.ado_pose_gt_rosmsg = msg.pose
         pose_tm = msg.header.stamp.to_sec()
         self.ado_pose_msg_buf.append(msg)
@@ -153,12 +190,20 @@ class ssp_rosbag:
 
 
     def ego_pose_gt_cb(self, msg):
-        if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
-            return
+        # if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
+        #     return
         self.ego_pose_gt_rosmsg = msg.pose
         pose_tm = msg.header.stamp.to_sec()
         self.ego_pose_msg_buf.append(msg)
         self.ego_pose_time_msg_buf.append(pose_tm)
+
+    def ego_pose_est_cb(self, msg):
+        # if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
+        #     return
+        self.ego_pose_est_rosmsg = msg.pose
+        pose_tm = msg.header.stamp.to_sec()
+        self.ego_pose_est_msg_buf.append(msg)
+        self.ego_pose_est_time_msg_buf.append(pose_tm)
 
 
     def image_cb(self, msg):
@@ -169,6 +214,9 @@ class ssp_rosbag:
         img_tm = msg.header.stamp.to_sec()
         if len(program.result_list) > 0 and img_tm <= self.result_list[-1][5]:
             return
+
+        if self.t0 is None:
+            self.t0 = img_tm
 
         img_cv2 = self.bridge.imgmsg_to_cv2(msg, desired_encoding="passthrough")
         img_cv2 = cv2.undistort(img_cv2, self.K, self.dist_coefs, None, self.new_camera_matrix)
@@ -189,41 +237,35 @@ class ssp_rosbag:
 
         # Compute [R|t] by pnp
         R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), self.corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(self.K, dtype='float32'))
-        tf_cam_ado = rotm_and_t_to_tf(R_pr, t_pr)
+        tf_cam_ado_est = rotm_and_t_to_tf(R_pr, t_pr)
+
+        if len(self.ado_pose_time_msg_buf) == 0 or len(self.ego_pose_time_msg_buf) == 0 or len(self.ego_pose_est_time_msg_buf) == 0:
+            print("still waiting for other rosbag messages")
+            return
 
         ado_msg, _ = find_closest_by_time(img_tm, self.ado_pose_time_msg_buf, message_list=self.ado_pose_msg_buf)
-        ego_msg, _ = find_closest_by_time(img_tm, self.ego_pose_time_msg_buf, message_list=self.ego_pose_msg_buf)
+        ego_gt_msg, _ = find_closest_by_time(img_tm, self.ego_pose_time_msg_buf, message_list=self.ego_pose_msg_buf)
+        ego_est_msg, _ = find_closest_by_time(img_tm, self.ego_pose_est_time_msg_buf, message_list=self.ego_pose_est_msg_buf)
 
         tf_w_ado_gt = pose_to_tf(ado_msg.pose)
-        tf_w_ego = pose_to_tf(ego_msg.pose)
+        tf_w_ego_gt = pose_to_tf(ego_gt_msg.pose)
+        tf_w_ego_est = pose_to_tf(ego_est_msg.pose)
 
-        tf_w_cam = tf_w_ego @ invert_tf(self.tf_cam_ego)
+        tf_w_cam_gt = tf_w_ego_gt @ invert_tf(self.tf_cam_ego)
 
-        tf_w_ado = tf_w_cam @ tf_cam_ado
+        tf_w_ado_est = tf_w_cam_gt @ tf_cam_ado_est
 
-        quat_pr = rotm_to_quat(tf_w_ado[0:3, 0:3])
-        state_pr = np.concatenate((tf_w_ado[0:3, 3], quat_pr))  # shape = (7,)
+        quat_pr = rotm_to_quat(tf_w_ado_est[0:3, 0:3])
+        state_pr = np.concatenate((tf_w_ado_est[0:3, 3], quat_pr))  # shape = (7,)
 
         img_to_save = copy(np.array(img.cpu()))
-        ############################
-        ############################
-        # bb_im_path = os.path.dirname(os.path.relpath(__file__)) + '/output_imgs' # PATH MUST BE RELATIVE
-        # create_dir_if_missing(bb_im_path)
-        # tf_cam_ado_gt = invert_tf(tf_w_cam) @ tf_w_ado_gt
-        # R_gt = tf_cam_ado_gt[0:3, 0:3]
-        # t_gt = tf_cam_ado_gt[0:3, 3].reshape(t_pr.shape)
-        # Rt_gt = np.concatenate((R_gt, t_gt), axis=1)
-        # corners2D_gt = compute_projection(np.hstack((np.reshape([0,0,0,1], (4,1)), self.vertices)), Rt_gt, self.new_camera_matrix).T
-        # draw_2d_proj_of_3D_bounding_box(img_to_save, corners2D_pr, corners2D_gt=corners2D_gt, epoch=None, batch_idx=None, detect_num=self.itr, im_save_dir=bb_im_path)
+        print("..................")
+        print("self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
+        # print("tf_cam_ado_est:\n{}".format(tf_cam_ado_est))
+        # print("tf_cam_ado_gt = invert_tf(tf_w_cam_gt) @ tf_w_ado_gt:\n{}".format(invert_tf(tf_w_cam_gt) @ tf_w_ado_gt))
 
-        # print("itr {}\n{}\n{}\n{}\n{}\n".format(self.itr, self.tf_cam_ego, invert_tf(self.tf_cam_ego), tf_w_ego, tf_w_cam))
-        self.tf_cam_ego
+        self.result_list.append((state_pr, copy(tf_w_ado_est), copy(tf_w_ado_gt), copy(corners2D_pr), img_to_save, img_tm, time.time(), copy(R_pr), copy(t_pr), invert_tf(tf_w_cam_gt), copy(tf_w_ego_gt), copy(tf_w_ego_est)) )
 
-        # pdb.set_trace()
-        ############################
-        ############################
-
-        self.result_list.append((state_pr, copy(tf_w_ado), copy(tf_w_ado_gt), copy(corners2D_pr), img_to_save, img_tm, time.time(), copy(R_pr), copy(t_pr), invert_tf(tf_w_cam), copy(tf_w_ego)) )
         del img
         self.itr += 1
         if self.itr > 0 and self.itr % 50 == 0:
@@ -234,6 +276,7 @@ class ssp_rosbag:
     def post_process_data(self):
         print("Post-processing data now ({} itrs)".format(len(self.result_list)))
         b_save_bb_imgs = True
+        name = self.ado_names[0]
         bb_im_path = os.path.dirname(os.path.relpath(__file__)) + '/output_imgs' # PATH MUST BE RELATIVE
         create_dir_if_missing(bb_im_path)
         N = len(self.result_list)
@@ -258,73 +301,54 @@ class ssp_rosbag:
         gts_rot             = []
         gts_corners2D       = []
         corners2D_gt = None
+        log_data = {}
         for i, res in enumerate(self.result_list):
 
             # extract /  compute values for comparison
-            state_pr, tf_w_ado, tf_w_ado_gt, corners2D_pr, img, img_tm, sys_time, R_pr, t_pr, tf_cam_w, tf_w_ego = res
-            tf_cam_ado_gt = tf_cam_w @ tf_w_ado_gt
-            R_gt = tf_cam_ado_gt[0:3, 0:3]
-            t_gt = tf_cam_ado_gt[0:3, 3].reshape(t_pr.shape)
+            state_pr, tf_w_ado_est, tf_w_ado_gt, corners2D_pr, img, img_tm, sys_time, R_cam_ado_pr, t_cam_ado_pr, tf_cam_w_gt, tf_w_ego_gt, tf_w_ego_est = res
+            tf_cam_ado_gt = tf_cam_w_gt @ tf_w_ado_gt
+            R_cam_ado_gt = tf_cam_ado_gt[0:3, 0:3]
+            t_cam_ado_gt = tf_cam_ado_gt[0:3, 3].reshape(t_cam_ado_pr.shape)
 
-            # Compute translation error
-            trans_dist = np.sqrt(np.sum(np.square(t_gt - t_pr)))
-            errs_trans.append(trans_dist)
-            
-            # Compute angle error
-            angle_dist = calcAngularDistance(R_gt, R_pr)
-            errs_angle.append(angle_dist)
-            
-            # Compute pixel error
-            Rt_gt        = np.concatenate((R_gt, t_gt), axis=1)
-            Rt_pr        = np.concatenate((R_pr, t_pr), axis=1)
-            proj_2d_gt   = compute_projection(self.vertices, Rt_gt, self.new_camera_matrix)
-            proj_2d_pred = compute_projection(self.vertices, Rt_pr, self.new_camera_matrix) 
-            norm         = np.linalg.norm(proj_2d_gt - proj_2d_pred, axis=0)
-            pixel_dist   = np.mean(norm)
-            errs_2d.append(pixel_dist)
+            print("\n---------------- ITR {}, t = {:.4f} ----------------".format(i, img_tm - self.t0))
+            print("tf_w_ado_est:\n{}".format(tf_w_ado_est))
+            print("tf_w_ado_gt:\n{}".format(tf_w_ado_gt))
+            print("tf_cam_w_gt:\n{}".format(tf_cam_w_gt))
+            print("tf_cam_ado_gt:\n{}".format(tf_cam_ado_gt))
+            print("tf_w_ego_gt:\n{}".format(tf_w_ego_gt))
 
-            # Compute corner prediction error
-            corners2D_gt = compute_projection(np.hstack((np.reshape([0,0,0,1], (4,1)), self.vertices)), Rt_gt, self.new_camera_matrix).T
-            corner_norm = np.linalg.norm(corners2D_gt - corners2D_pr, axis=1)
-            corner_dist = np.mean(corner_norm)
-            errs_corner2D.append(corner_dist)
-
-            # Compute 3D distances
-            transform_3d_gt   = compute_transformation(self.vertices, Rt_gt) 
-            transform_3d_pred = compute_transformation(self.vertices, Rt_pr)  
-            norm3d            = np.linalg.norm(transform_3d_gt - transform_3d_pred, axis=0)
-            vertex_dist       = np.mean(norm3d)
-            errs_3d.append(vertex_dist)
-
-            # Sum errors
-            testing_error_trans  += trans_dist
-            testing_error_angle  += angle_dist
-            testing_error_pixel  += pixel_dist
-            testing_samples      += 1
+            Rt_cam_ado_gt = np.concatenate((R_cam_ado_gt, t_cam_ado_gt), axis=1)
+            Rt_cam_ado_pr = np.concatenate((R_cam_ado_pr, t_cam_ado_pr), axis=1)
+            corners2D_gt = compute_projection(np.hstack((np.reshape([0,0,0,1], (4,1)), self.vertices)), Rt_cam_ado_gt, self.new_camera_matrix).T
+      
             if b_save_bb_imgs:
                 draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=corners2D_gt, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
 
-        # Compute 2D projection error, 6D pose error, 5cm5degree error
-        px_threshold = 5 # 5 pixel threshold for 2D reprojection error is standard in recent sota 6D object pose estimation works 
-        eps          = 1e-5
-        acc          = len(np.where(np.array(errs_2d) <= px_threshold)[0]) * 100. / (len(errs_2d)+eps)
-        acc5cm5deg   = len(np.where((np.array(errs_trans) <= 0.05) & (np.array(errs_angle) <= 5))[0]) * 100. / (len(errs_trans)+eps)
-        acc3d10      = len(np.where(np.array(errs_3d) <= self.diam * 0.1)[0]) * 100. / (len(errs_3d)+eps)
-        acc5cm5deg   = len(np.where((np.array(errs_trans) <= 0.05) & (np.array(errs_angle) <= 5))[0]) * 100. / (len(errs_trans)+eps)
-        corner_acc   = len(np.where(np.array(errs_corner2D) <= px_threshold)[0]) * 100. / (len(errs_corner2D)+eps)
-        mean_err_2d  = np.mean(errs_2d)
-        mean_corner_err_2d = np.mean(errs_corner2D)
-        nts = float(testing_samples)
+            if self.raptor_metrics is not None:
+                # self.raptor_metrics.update_all_metrics(vertices=self.vertices, R_gt=R_gt, t_gt=t_gt, R_pr=R_pr, t_pr=t_pr, K=self.new_camera_matrix)
+                self.raptor_metrics.update_all_metrics(name=name, vertices=self.vertices, tf_w_cam=invert_tf(tf_cam_w_gt), R_cam_ado_gt=R_cam_ado_gt, t_cam_ado_gt=t_cam_ado_gt, R_cam_ado_pr=R_cam_ado_pr, t_cam_ado_pr=t_cam_ado_pr, K=self.new_camera_matrix)
 
-        # Print test statistics
-        logging('\nResults of {}'.format(self.name))
-        logging('   Acc using {} px 2D Projection = {:.2f}%'.format(px_threshold, acc))
-        logging('   Acc using 10% threshold - {} vx 3D Transformation = {:.2f}%'.format(self.diam * 0.1, acc3d10))
-        logging('   Acc using 5 cm 5 degree metric = {:.2f}%'.format(acc5cm5deg))
-        logging("   Mean 2D pixel error is %f, Mean vertex error is %f, mean corner error is %f" % (mean_err_2d, np.mean(errs_3d), mean_corner_err_2d))
-        logging('   Translation error: %f m, angle error: %f degree, pixel error: % f pix' % (testing_error_trans/nts, testing_error_angle/nts, testing_error_pixel/nts) )
-        pdb.set_trace()
 
+            # Write data to log file #############################
+            log_data['time'] = img_tm - self.t0
+            log_data['state_est'] = tf_to_state_vec(tf_w_ado_est)
+            log_data['state_gt'] = tf_to_state_vec(tf_w_ado_gt)
+            log_data['ego_state_est'] = tf_to_state_vec(tf_w_ego_est)
+            log_data['ego_state_gt'] = tf_to_state_vec(tf_w_ego_gt)
+            corners3D_pr = (tf_w_ado_est @ self.vertices)[0:3,:]
+            corners3D_gt = (tf_w_ado_gt @ self.vertices)[0:3,:]
+            log_data['corners_3d_est'] = np.reshape(corners3D_pr, (corners3D_pr.size,))
+            log_data['corners_3d_gt'] = np.reshape(corners3D_gt, (corners3D_gt.size,))
+            log_data['proj_corners_est'] = np.reshape(self.raptor_metrics.proj_2d_pr[name].T, (self.raptor_metrics.proj_2d_pr[name].size,))
+            log_data['proj_corners_gt'] = np.reshape(self.raptor_metrics.proj_2d_gt[name].T, (self.raptor_metrics.proj_2d_gt[name].size,))
+            pdb.set_trace()
+            self.logger.write_data_to_log(log_data, name, mode='ssp')
+            ######################################################
+        if self.raptor_metrics is not None:
+            self.raptor_metrics.calc_final_metrics()
+            self.raptor_metrics.print_final_metrics()
+
+        self.logger.close_files()
         print("done with post process!")
         
 

@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import os
+from scipy.spatial.transform import Rotation as R
 import pdb
 
 ###########################################################
@@ -61,3 +62,20 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
 
     return open_cv_image
 ###########################################################
+
+def tf_to_state_vec(tf):
+    """ Turn a 4x4 tf pose message into a 13 el state vector (w/ 0 vels) """
+    state = np.zeros((13,))
+    state[0:3] = tf[0:3, 3]
+    state[6:10] = rotm_to_quat(tf[0:3, 0:3])
+    if state[6] < 0:
+        state[6:10] *= -1
+    return state
+
+
+def rotm_to_quat(rotm):
+    """ 
+    calculate the rotation matrix of a given quaternion (frames assumed to be consistant 
+    with the UKF state quaternion). First element of quat is the scalar.
+    """
+    return np.roll(R.from_dcm(rotm).as_quat(),1)
