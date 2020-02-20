@@ -147,32 +147,38 @@ class ssp_rosbag:
 
 
         self.log_out_dir = '/mounted_folder/ssp_logs'
-        ssp_log_name    = self.log_out_dir + "/log_" + rb_name[:-4].split("_")[-1] + "_SSP.log"
-        param_log_name = self.log_out_dir + "/log_" + rb_name[:-4].split("_")[-1] + "_PARAM.log"
-        self.logger = raptor_logger(source="SSP", mode="write", ssp_fn=ssp_log_name, param_fn=param_log_name)
+        # ssp_log_name    = self.log_out_dir + "/log_" + rb_name.split("_")[-1] + "_SSP.log"
+        # param_log_name = self.log_out_dir + "/log_" + rb_name.split("_")[-1] + "_PARAM.log"
+        # self.logger = raptor_logger(source="SSP", mode="write", ssp_fn=ssp_log_name, param_fn=param_log_name)
+        base_path = self.log_out_dir + "/log_" + rb_name.split("_")[-1]
+        self.ado_names = ['mslquad']
+        self.bb_3d_dict_all = {'mslquad' : [box_length, box_width, box_height, self.diam]}
+        self.logger = RaptorLogger(mode="write", names=self.ado_names, base_path=base_path)
 
         # Write params to log file ########################################################################################################
-        log_data = {}
+        param_data = {}
         if self.new_camera_matrix is not None:
-            log_data['K'] = np.array([self.new_camera_matrix[0, 0], self.new_camera_matrix[1, 1], self.new_camera_matrix[0, 2], self.new_camera_matrix[1, 2]])
+            param_data['K'] = np.array([self.new_camera_matrix[0, 0], self.new_camera_matrix[1, 1], self.new_camera_matrix[0, 2], self.new_camera_matrix[1, 2]])
         else:
-            log_data['K'] = np.array([self.K[0, 0], self.K[1, 1], self.K[0, 2], self.K[1, 2]])
-        log_data['3d_bb_dims'] = np.array([box_length, box_width, box_height, self.diam])
-        log_data['tf_cam_ego'] = np.reshape(self.tf_cam_ego, (16,))
-        self.logger.write_data_to_log(log_data, mode='prms')
+            param_data['K'] = np.array([self.K[0, 0], self.K[1, 1], self.K[0, 2], self.K[1, 2]])
+        param_data['3d_bb_dims'] = np.array([box_length, box_width, box_height, self.diam])
+        param_data['tf_cam_ego'] = np.reshape(self.tf_cam_ego, (16,))
+        # self.logger.write_data_to_log(log_data, mode='prms')
+        self.logger.write_params(param_data)
         ###################################################################################################################################
         self.t0 = None
-        self.raptor_metrics = pose_metric_tracker(px_thresh=5, prct_thresh=10, trans_thresh=0.05, ang_thresh=5, name=self.name, diam=self.diam)
-
+        # self.raptor_metrics = pose_metric_tracker(px_thresh=5, prct_thresh=10, trans_thresh=0.05, ang_thresh=5, name=self.name, diam=self.diam)
+        self.raptor_metrics = PoseMetricTracker(px_thresh=5, prct_thresh=10, trans_thresh=0.05, ang_thresh=5, names=self.ado_names, bb_3d_dict=self.bb_3d_dict_all)
+        
         rospy.Subscriber(self.ns + '/mavros/vision_pose/pose', PoseStamped, self.ego_pose_gt_cb, queue_size=10)  # optitrack pose
-        rospy.Subscriber(self.ns + '/mavros/local_position/pose', PoseStamped, self.ego_pose_est_cb, queue_size=10)  # optitrack pose
+        rospy.Subscriber(self.ns + '/mavros/local_position/pose', PoseStamped, self.ego_pose_est_cb, queue_size=10)  # onboard ekf pose est
+        rospy.Subscriber('/quad4' + '/mavros/vision_pose/pose', PoseStamped, self.ado_pose_gt_cb, queue_size=10)  # optitrack pose
         rospy.Subscriber(self.ns + '/camera/image_raw', ROS_IMAGE, self.image_cb, queue_size=1,buff_size=2**21)
-        rospy.Subscriber('/quad4' + '/mavros/vision_pose/pose', PoseStamped, self.ado_pose_gt_cb, queue_size=10)  # DEBUG ONLY - optitrack pose
 
         
     def ado_pose_gt_cb(self, msg):
-        if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
-            return
+        # if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
+        #     return
         self.ado_pose_gt_rosmsg = msg.pose
         pose_tm = msg.header.stamp.to_sec()
         self.ado_pose_msg_buf.append(msg)
@@ -180,16 +186,16 @@ class ssp_rosbag:
 
 
     def ego_pose_gt_cb(self, msg):
-        if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
-            return
+        # if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
+        #     return
         self.ego_pose_gt_rosmsg = msg.pose
         pose_tm = msg.header.stamp.to_sec()
         self.ego_pose_msg_buf.append(msg)
         self.ego_pose_time_msg_buf.append(pose_tm)
 
     def ego_pose_est_cb(self, msg):
-        if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
-            return
+        # if self.first_time is not None and self.first_time >= msg.header.stamp.to_sec():
+        #     return
         self.ego_pose_est_rosmsg = msg.pose
         pose_tm = msg.header.stamp.to_sec()
         self.ego_pose_est_msg_buf.append(msg)
@@ -229,6 +235,10 @@ class ssp_rosbag:
         R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), self.corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(self.K, dtype='float32'))
         tf_cam_ado = rotm_and_t_to_tf(R_pr, t_pr)
 
+        if len(self.ado_pose_time_msg_buf) == 0 or len(self.ego_pose_time_msg_buf) == 0 or len(self.ego_pose_est_time_msg_buf) == 0:
+            print("still waiting for other rosbag messages")
+            return
+
         ado_msg, _ = find_closest_by_time(img_tm, self.ado_pose_time_msg_buf, message_list=self.ado_pose_msg_buf)
         ego_gt_msg, _ = find_closest_by_time(img_tm, self.ego_pose_time_msg_buf, message_list=self.ego_pose_msg_buf)
         ego_est_msg, _ = find_closest_by_time(img_tm, self.ego_pose_est_time_msg_buf, message_list=self.ego_pose_est_msg_buf)
@@ -257,6 +267,7 @@ class ssp_rosbag:
     def post_process_data(self):
         print("Post-processing data now ({} itrs)".format(len(self.result_list)))
         b_save_bb_imgs = True
+        name = self.ado_names[0]
         bb_im_path = os.path.dirname(os.path.relpath(__file__)) + '/output_imgs' # PATH MUST BE RELATIVE
         create_dir_if_missing(bb_im_path)
         N = len(self.result_list)
@@ -285,20 +296,22 @@ class ssp_rosbag:
         for i, res in enumerate(self.result_list):
 
             # extract /  compute values for comparison
-            state_pr, tf_w_ado_est, tf_w_ado_gt, corners2D_pr, img, img_tm, sys_time, R_pr, t_pr, tf_cam_w_gt, tf_w_ego_gt, tf_w_ego_est = res
+            state_pr, tf_w_ado_est, tf_w_ado_gt, corners2D_pr, img, img_tm, sys_time, R_cam_ado_pr, t_cam_ado_pr, tf_cam_w_gt, tf_w_ego_gt, tf_w_ego_est = res
             tf_cam_ado_gt = tf_cam_w_gt @ tf_w_ado_gt
-            R_gt = tf_cam_ado_gt[0:3, 0:3]
-            t_gt = tf_cam_ado_gt[0:3, 3].reshape(t_pr.shape)
+            R_cam_ado_gt = tf_cam_ado_gt[0:3, 0:3]
+            t_cam_ado_gt = tf_cam_ado_gt[0:3, 3].reshape(t_cam_ado_pr.shape)
 
-            Rt_gt        = np.concatenate((R_gt, t_gt), axis=1)
-            Rt_pr        = np.concatenate((R_pr, t_pr), axis=1)
+            Rt_gt        = np.concatenate((R_cam_ado_gt, t_cam_ado_gt), axis=1)
+            Rt_pr        = np.concatenate((R_cam_ado_pr, t_cam_ado_pr), axis=1)
             corners2D_gt = compute_projection(np.hstack((np.reshape([0,0,0,1], (4,1)), self.vertices)), Rt_gt, self.new_camera_matrix).T
       
             if b_save_bb_imgs:
                 draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=corners2D_gt, epoch=None, batch_idx=None, detect_num=i, im_save_dir=bb_im_path)
 
             if self.raptor_metrics is not None:
-                self.raptor_metrics.update_all_metrics(vertices=self.vertices, R_gt=R_gt, t_gt=t_gt, R_pr=R_pr, t_pr=t_pr, K=self.new_camera_matrix)
+                # self.raptor_metrics.update_all_metrics(vertices=self.vertices, R_gt=R_gt, t_gt=t_gt, R_pr=R_pr, t_pr=t_pr, K=self.new_camera_matrix)
+                self.raptor_metrics.update_all_metrics(name=name, vertices=self.vertices, tf_w_cam=invert_tf(tf_cam_w_gt), R_cam_ado_gt=R_cam_ado_gt, t_cam_ado_gt=t_cam_ado_gt, R_cam_ado_pr=R_cam_ado_pr, t_cam_ado_pr=t_cam_ado_pr, K=self.new_camera_matrix)
+
             # Write data to log file #############################
             log_data['time'] = img_tm - self.t0
             log_data['state_est'] = tf_to_state_vec(tf_w_ado_est)
@@ -309,9 +322,9 @@ class ssp_rosbag:
             corners3D_gt = (tf_w_ado_gt @ self.vertices)[0:3,:]
             log_data['corners_3d_est'] = np.reshape(corners3D_pr, (corners3D_pr.size,))
             log_data['corners_3d_gt'] = np.reshape(corners3D_gt, (corners3D_gt.size,))
-            log_data['proj_corners_est'] = np.reshape(self.raptor_metrics.proj_2d_pr.T, (self.raptor_metrics.proj_2d_pr.size,))
-            log_data['proj_corners_gt'] = np.reshape(self.raptor_metrics.proj_2d_gt.T, (self.raptor_metrics.proj_2d_gt.size,))
-            self.logger.write_data_to_log(log_data, mode='ssp')
+            log_data['proj_corners_est'] = np.reshape(self.raptor_metrics.proj_2d_pr[name].T, (self.raptor_metrics.proj_2d_pr[name].size,))
+            log_data['proj_corners_gt'] = np.reshape(self.raptor_metrics.proj_2d_gt[name].T, (self.raptor_metrics.proj_2d_gt[name].size,))
+            self.logger.write_data_to_log(log_data, name, mode='ssp')
             ######################################################
         if self.raptor_metrics is not None:
             self.raptor_metrics.calc_final_metrics()
