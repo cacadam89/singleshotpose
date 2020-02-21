@@ -9,6 +9,7 @@ import scipy.io
 import warnings
 from torch.autograd import Variable
 from torchvision import datasets, transforms
+import numpy.linalg as la
 
 from darknet import Darknet
 from utils import *
@@ -152,6 +153,7 @@ class ssp_rosbag:
         # param_log_name = self.log_out_dir + "/log_" + rb_name.split("_")[-1] + "_PARAM.log"
         # self.logger = raptor_logger(source="SSP", mode="write", ssp_fn=ssp_log_name, param_fn=param_log_name)
         base_path = self.log_out_dir + "/log_" + rb_name.split("_")[-1]
+        self.rb_name = rb_name
         self.bb_3d_dict_all = {self.ado_names[0] : [box_length, box_width, box_height, self.diam]}
         self.logger = RaptorLogger(mode="write", names=self.ado_names, base_path=base_path, b_ssp=True)
 
@@ -233,6 +235,7 @@ class ssp_rosbag:
 
         # Compute [R|t] by pnp
         R_pr, t_pr = pnp(np.array(np.transpose(np.concatenate((np.zeros((3, 1)), self.corners3D[:3, :]), axis=1)), dtype='float32'),  corners2D_pr, np.array(self.K, dtype='float32'))
+
         tf_cam_ado_est = rotm_and_t_to_tf(R_pr, t_pr)
 
         if len(self.ado_pose_time_msg_buf) == 0 or len(self.ego_pose_time_msg_buf) == 0 or len(self.ego_pose_est_time_msg_buf) == 0:
@@ -251,6 +254,9 @@ class ssp_rosbag:
 
         tf_w_ado_est = tf_w_cam_gt @ tf_cam_ado_est
 
+        tf_w_ado_est[0:3, 0:3] = quat_to_rotm(remove_yaw(rotm_to_quat(tf_w_ado_est[0:3, 0:3])))  # remove yaw
+        tf_w_ado_gt[0:3, 0:3] = quat_to_rotm(remove_yaw(rotm_to_quat(tf_w_ado_est[0:3, 0:3])))  # remove yaw
+        
         quat_pr = rotm_to_quat(tf_w_ado_est[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado_est[0:3, 3], quat_pr))  # shape = (7,)
 
@@ -305,13 +311,15 @@ class ssp_rosbag:
             tf_cam_ado_gt = tf_cam_w_gt @ tf_w_ado_gt
             R_cam_ado_gt = tf_cam_ado_gt[0:3, 0:3]
             t_cam_ado_gt = tf_cam_ado_gt[0:3, 3].reshape(t_cam_ado_pr.shape)
-
-            # print("\n---------------- ITR {}, t = {:.4f} ----------------".format(i, img_tm - self.t0))
-            # print("tf_w_ado_est:\n{}".format(tf_w_ado_est))
-            # print("tf_w_ado_gt:\n{}".format(tf_w_ado_gt))
-            # print("tf_cam_w_gt:\n{}".format(tf_cam_w_gt))
-            # print("tf_cam_ado_gt:\n{}".format(tf_cam_ado_gt))
-            # print("tf_w_ego_gt:\n{}".format(tf_w_ego_gt))
+            # if i == 0:
+            #     pdb.set_trace()
+            if i > 400 and self.rb_name == "rosbag_for_post_process_2019-12-18-02-10-28":
+                print("STOPPING EARLY")
+                break # quad crashes
+            # if la.norm(tf_cam_ado_gt[0:3, 3] - t_cam_ado_pr) > 4:
+            #     print("skipping (norm = {:.3f}".format(la.norm(tf_cam_ado_gt[0:3, 3] - t_cam_ado_pr)))
+            #     continue
+            # print(".")
 
             Rt_cam_ado_gt = np.concatenate((R_cam_ado_gt, t_cam_ado_gt), axis=1)
             Rt_cam_ado_pr = np.concatenate((R_cam_ado_pr, t_cam_ado_pr), axis=1)
@@ -337,7 +345,21 @@ class ssp_rosbag:
             log_data['corners_3d_gt'] = np.reshape(corners3D_gt, (corners3D_gt.size,))
             log_data['proj_corners_est'] = np.reshape(self.raptor_metrics.proj_2d_pr[name].T, (self.raptor_metrics.proj_2d_pr[name].size,))
             log_data['proj_corners_gt'] = np.reshape(self.raptor_metrics.proj_2d_gt[name].T, (self.raptor_metrics.proj_2d_gt[name].size,))
+
+
+            log_data['x_err'] = tf_w_ado_est[0, 3] - tf_w_ado_gt[0, 3]
+            log_data['y_err'] = tf_w_ado_est[1, 3] - tf_w_ado_gt[1, 3]
+            log_data['z_err'] = tf_w_ado_est[2, 3] - tf_w_ado_gt[2, 3]
+            log_data['ang_err'] = calcAngularDistance(tf_w_ado_est[0:3, 0:3], tf_w_ado_gt[0:3, 0:3])
+            log_data['pix_err'] = np.mean(la.norm(self.raptor_metrics.proj_2d_pr[name] - self.raptor_metrics.proj_2d_gt[name], axis=0))
+            log_data['measurement_dist'] = la.norm(tf_w_ego_gt[0:3, 3] - tf_w_ado_gt[0:3, 3])
+
             self.logger.write_data_to_log(log_data, name, mode='ssp')
+            self.logger.write_data_to_log(log_data, name, mode='ssperr')
+
+            if np.any(np.isnan(corners3D_pr)) or np.any(np.isnan(corners3D_gt)) or np.any(np.isnan(self.raptor_metrics.proj_2d_pr[name])): #or la.norm(tf_cam_ado_gt[0:3, 3] - t_cam_ado_pr) > 10:
+                print("ISSUE DETECTED!!")
+                pdb.set_trace()
             ######################################################
         if self.raptor_metrics is not None:
             self.raptor_metrics.calc_final_metrics()

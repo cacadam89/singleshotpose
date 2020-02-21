@@ -46,6 +46,13 @@ class RaptorLogger:
                                 ('Corner 2D Projections GT (r|c)', 'proj_corners_gt', 8*2), 
                                 ('Angled BB (r|c|w|h|ang_deg)', 'abb', 5),
                                 ('Image Segmentation Mode', 'im_seg_mode', 1)]
+        self.save_elms['err'] = [('Time (s)', 'time', 1),  # list of tuples ("HEADER STRING", "DICT KEY STRING", # OF VALUES (int))
+                                 ('x err', 'x_err', 1),
+                                 ('y err', 'y_err', 1),
+                                 ('z err', 'z_err', 1),
+                                 ('ang err (deg)', 'ang_err', 1),
+                                 ('3d projection pix norm err', 'pix_err', 1),
+                                 ('Distance camera to ado', 'measurement_dist', 1)]
         self.save_elms['ssp'] = [('Time (s)', 'time', 1),  # list of tuples ("HEADER STRING", "DICT KEY STRING", # OF VALUES (int))
                                  ('Ado State GT', 'state_gt', 13), 
                                  ('Ado State Est', 'state_est', 13), 
@@ -55,11 +62,12 @@ class RaptorLogger:
                                  ('3D Corner GT (X|Y|Z)', 'corners_3d_gt', 8*3), 
                                  ('Corner 2D Projections Est (r|c)', 'proj_corners_est', 8*2), 
                                  ('Corner 2D Projections GT (r|c)', 'proj_corners_gt', 8*2)]
+        self.save_elms['ssperr'] = self.save_elms['err']
 
         if not b_ssp:
-            self.modes = ['est', 'gt']
+            self.modes = ['est', 'gt', 'err']
         else:
-            self.modes = ['ssp']
+            self.modes = ['ssp', 'ssperr']
 
 
         if mode=="read":
@@ -101,6 +109,8 @@ class RaptorLogger:
         self.read_params()
         self.fn = defaultdict(dict)
         for m in self.modes:
+            if self.names is None:
+                return
             for n in self.names:
                 self.fn[m][n] = self.base_path + '_' + n + '_'+ m + '.log'
 
@@ -133,6 +143,9 @@ class RaptorLogger:
     
     def read_params(self, log_type='prms'):
         # get header
+        if not os.path.isfile(self.prm_fn):
+            print("WARNING: NOT READING PARAMS")
+            return
         f = open(self.prm_fn)
         header_str = f.readline()
         self.log_data[log_type]['ado_names'] = header_str.split('[')[1].split(']')[0].split(' ')
@@ -168,8 +181,8 @@ class RaptorLogger:
 
     def write_data_to_log(self, data, name, mode):
         """ mode can be est, gt, ssp"""
-        if (not self.b_ssp and not mode in ['est', 'gt']) or (self.b_ssp and not mode == 'ssp'):
-            raise RuntimeError("Mode {} not recognized".format(mode))
+        if not self.b_ssp and not mode in self.modes:
+            raise RuntimeError("Mode {} not recognized. Available modes are {}".format(mode, self.modes))
         save_el_shape = (len(self.save_elms[mode]), len(self.save_elms[mode][0]))
         num_to_write = np.sum(np.reshape([*zip(self.save_elms[mode])], save_el_shape)[:,2].astype(int)) 
         out = np.ones((1, num_to_write)) * 1e10
@@ -190,9 +203,6 @@ class RaptorLogger:
         """
         Return a dict with keys being log type (est /gt /prms). Each of these is a dict with the various types of values in the log
         """
-        if self.names is None:
-            self.log_data[log_type]
-
         for log_type in self.fn:
             if not log_type in self.save_elms:
                 print("Warning: we are are missing the log file for {}".format(log_type))
@@ -207,6 +217,26 @@ class RaptorLogger:
                 ind += count
                 
         return self.log_data
+
+
+    def read_err_logs(self, log_path):
+        """
+        Return a dict with keys being error type
+        """
+        err_log_dict = {}
+
+        ind = 0
+        f = open(log_path)
+        header_str = f.readline()
+        data = np.loadtxt(f)
+        for i, (header_str, dict_str, count) in enumerate(self.save_elms["err"]):
+            if len(data.shape) > 1:
+                err_log_dict[dict_str] = data[:, ind:(ind + count)]
+            else:
+                err_log_dict[dict_str] = data[ind:(ind + count)]
+            ind += count
+                
+        return err_log_dict
         
 
     def close_files(self):
