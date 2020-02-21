@@ -11,6 +11,7 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
     """
     open_cv_image = np.array(img)  # make it a numpy arr
     open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image), 0, -1)[:, :, ::-1] # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
+    # open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image), 0, -1) # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
     open_cv_image = cv2.resize(open_cv_image, (640, 480))
 
     dot_radius = 2
@@ -27,17 +28,23 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
         for i, pnt in enumerate(corners2D_gt):
             open_cv_image = cv2.circle(open_cv_image, (pnt[0], pnt[1]), dot_radius, color_list[i], -1)  # -1 means filled in, else edge thickness
 
-    inds_to_connect = [[1,2], [2, 4], [4, 3], [3, 1], # front face edges
-                       [5,6], [6, 8], [8, 7], [7, 5], # back face edges
-                       [1,5], [2, 6], [4, 8], [3, 7]] # side edges
     
+    inds_to_connect_gt = [[1, 4], [4, 3], [3, 2], [2, 1], # front face edges
+                          [8, 5], [5, 6], [6, 7], [7, 8], # back face edges
+                          [1, 8], [4, 5], [3, 6], [2, 7]] # side edges
+    
+    inds_to_connect_pr = [[1,2], [2, 4], [4, 3], [3, 1], # front face edges
+                          [5,6], [6, 8], [8, 7], [7, 5], # back face edges
+                          [1,5], [2, 6], [4, 8], [3, 7]] # side edges
+
     color_gt = (255,0,0)  # blue
     color_pr = (0,0,255)  # red
     linewidth = 1
-    for inds in inds_to_connect:
-
-        if corners2D_gt is not None:
+    if corners2D_gt is not None:
+        for inds in inds_to_connect_gt:
             open_cv_image = cv2.line(open_cv_image, (corners2D_gt[inds[0],0], corners2D_gt[inds[0],1]), (corners2D_gt[inds[1],0], corners2D_gt[inds[1], 1]), color_gt, linewidth)
+            
+    for inds in inds_to_connect_pr:
         open_cv_image = cv2.line(open_cv_image, (corners2D_pr[inds[0],0], corners2D_pr[inds[0],1]), (corners2D_pr[inds[1],0], corners2D_pr[inds[1], 1]), color_pr, linewidth)
     
     if im_save_dir is None:
