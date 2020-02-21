@@ -10,8 +10,8 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
     corners2D_gt/corners2D_pr is a 9x2 numpy array
     """
     open_cv_image = np.array(img)  # make it a numpy arr
-    open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image), 0, -1)[:, :, ::-1] # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
-    # open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image), 0, -1) # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
+    # open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image), 0, -1)[:, :, ::-1] # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
+    open_cv_image = np.moveaxis(255*np.squeeze(open_cv_image), 0, -1) # take out extra axis and go from (C, W, H) to (W, H, C). also 0-255 instead of 0 - 1
     open_cv_image = cv2.resize(open_cv_image, (640, 480))
 
     dot_radius = 2
@@ -24,9 +24,9 @@ def draw_2d_proj_of_3D_bounding_box(img, corners2D_pr, corners2D_gt=None, epoch=
                   (0, 0, 0),       # 6 black: back upper right
                   (255, 255, 255), # 7 white: back lower left
                   (125, 125, 125)] # 8 grey: back upper left
-    if corners2D_gt is not None:
-        for i, pnt in enumerate(corners2D_gt):
-            open_cv_image = cv2.circle(open_cv_image, (pnt[0], pnt[1]), dot_radius, color_list[i], -1)  # -1 means filled in, else edge thickness
+    # if corners2D_gt is not None:
+    #     for i, pnt in enumerate(corners2D_gt):
+    #         open_cv_image = cv2.circle(open_cv_image, (pnt[0], pnt[1]), dot_radius, color_list[i], -1)  # -1 means filled in, else edge thickness
 
     
     inds_to_connect_gt = [[1, 4], [4, 3], [3, 2], [2, 1], # front face edges

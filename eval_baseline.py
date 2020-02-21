@@ -254,17 +254,21 @@ class ssp_rosbag:
 
         tf_w_ado_est = tf_w_cam_gt @ tf_cam_ado_est
 
-        tf_w_ado_est[0:3, 0:3] = quat_to_rotm(remove_yaw(rotm_to_quat(tf_w_ado_est[0:3, 0:3])))  # remove yaw
-        tf_w_ado_gt[0:3, 0:3] = quat_to_rotm(remove_yaw(rotm_to_quat(tf_w_ado_est[0:3, 0:3])))  # remove yaw
-        
         quat_pr = rotm_to_quat(tf_w_ado_est[0:3, 0:3])
         state_pr = np.concatenate((tf_w_ado_est[0:3, 3], quat_pr))  # shape = (7,)
 
+        b_remove_yaw = True
+        if b_remove_yaw:
+            quat_pr_with_yaw = quat_pr  # quat with yaw
+            quat_gt = rotm_to_quat(tf_w_ado_gt[0:3, 0:3])  # quat with yaw
+
+            quat_pr = remove_yaw(quat_pr)  # remove yaw
+            quat_gt = remove_yaw(quat_gt)  # remove yaw
+
+            tf_w_ado_est[0:3, 0:3] = quat_to_rotm(quat_pr)  # update tf
+            tf_w_ado_gt[0:3, 0:3] = quat_to_rotm(quat_gt)  # update tf
+
         img_to_save = copy(np.array(img.cpu()))
-        # print("..................")
-        # print("self.tf_cam_ego:\n{}".format(self.tf_cam_ego))
-        # print("tf_cam_ado_est:\n{}".format(tf_cam_ado_est))
-        # print("tf_cam_ado_gt = invert_tf(tf_w_cam_gt) @ tf_w_ado_gt:\n{}".format(invert_tf(tf_w_cam_gt) @ tf_w_ado_gt))
 
         self.result_list.append((state_pr, copy(tf_w_ado_est), copy(tf_w_ado_gt), copy(corners2D_pr), img_to_save, img_tm, time.time(), copy(R_pr), copy(t_pr), invert_tf(tf_w_cam_gt), copy(tf_w_ego_gt), copy(tf_w_ego_est)) )
 
@@ -311,15 +315,10 @@ class ssp_rosbag:
             tf_cam_ado_gt = tf_cam_w_gt @ tf_w_ado_gt
             R_cam_ado_gt = tf_cam_ado_gt[0:3, 0:3]
             t_cam_ado_gt = tf_cam_ado_gt[0:3, 3].reshape(t_cam_ado_pr.shape)
-            # if i == 0:
-            #     pdb.set_trace()
+
             if i > 400 and self.rb_name == "rosbag_for_post_process_2019-12-18-02-10-28":
                 print("STOPPING EARLY")
                 break # quad crashes
-            # if la.norm(tf_cam_ado_gt[0:3, 3] - t_cam_ado_pr) > 4:
-            #     print("skipping (norm = {:.3f}".format(la.norm(tf_cam_ado_gt[0:3, 3] - t_cam_ado_pr)))
-            #     continue
-            # print(".")
 
             Rt_cam_ado_gt = np.concatenate((R_cam_ado_gt, t_cam_ado_gt), axis=1)
             Rt_cam_ado_pr = np.concatenate((R_cam_ado_pr, t_cam_ado_pr), axis=1)
