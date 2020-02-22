@@ -316,7 +316,7 @@ class ssp_rosbag:
             R_cam_ado_gt = tf_cam_ado_gt[0:3, 0:3]
             t_cam_ado_gt = tf_cam_ado_gt[0:3, 3].reshape(t_cam_ado_pr.shape)
 
-            if i > 400 and self.rb_name == "rosbag_for_post_process_2019-12-18-02-10-28":
+            if img_tm - self.t0 > 34 and self.rb_name == "rosbag_for_post_process_2019-12-18-02-10-28":
                 print("STOPPING EARLY")
                 break # quad crashes
 
