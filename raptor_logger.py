@@ -52,6 +52,7 @@ class RaptorLogger:
                                  ('z err', 'z_err', 1),
                                  ('ang err (deg)', 'ang_err', 1),
                                  ('3d projection pix norm err', 'pix_err', 1),
+                                 ('3d corner norm err (ADD)', 'add_err', 1),
                                  ('Distance camera to ado', 'measurement_dist', 1)]
         self.save_elms['ssp'] = [('Time (s)', 'time', 1),  # list of tuples ("HEADER STRING", "DICT KEY STRING", # OF VALUES (int))
                                  ('Ado State GT', 'state_gt', 13), 
