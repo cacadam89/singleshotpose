@@ -169,6 +169,7 @@ class ssp_rosbag:
         self.logger.write_params(param_data)
         ###################################################################################################################################
         self.t0 = None
+        self.time_arr = []
         # self.raptor_metrics = pose_metric_tracker(px_thresh=5, prct_thresh=10, trans_thresh=0.05, ang_thresh=5, name=self.name, diam=self.diam)
         self.raptor_metrics = PoseMetricTracker(px_thresh=5, prct_thresh=10, trans_thresh=0.05, ang_thresh=5, names=self.ado_names, bb_3d_dict=self.bb_3d_dict_all)
         
@@ -209,6 +210,7 @@ class ssp_rosbag:
         Maintains a buffer of images & times. The first element is the earliest. 
         Stored in a way to interface with a quick method for finding closest match by time.
         """
+        tic = time.time()
         img_tm = msg.header.stamp.to_sec()
         if len(program.result_list) > 0 and img_tm <= self.result_list[-1][5]:
             return
@@ -274,8 +276,9 @@ class ssp_rosbag:
 
         del img
         self.itr += 1
+        self.time_arr.append(time.time() - tic)
         if self.itr > 0 and self.itr % 50 == 0:
-            print("Finished processing image #{}".format(self.itr))
+            print("Finished processing image #{}, mean time: {}".format(self.itr, np.mean(self.time_arr)))
             torch.cuda.empty_cache()
 
 
